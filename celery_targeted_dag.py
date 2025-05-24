@@ -1,4 +1,16 @@
 # celery_targeted_dag.py
+
+# If you prefer using your Celery setup, you can assign specific tasks to specific workers:
+
+# Start workers on different machines with specific queue names:
+
+# bash# On machine 1
+# airflow celery worker -q machine1_queue
+
+# # On machine 2
+# airflow celery worker -q machine2_queue
+
+
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
