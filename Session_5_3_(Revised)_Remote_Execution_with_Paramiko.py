@@ -117,9 +117,9 @@ with DAG(
     
     # Define remote connection parameters
     # For security, these could be stored in Airflow Variables or Connections
-    REMOTE_HOST = "your_remote_host"  # Replace with your remote host
-    USERNAME = "your_username"        # Replace with your SSH username
-    KEY_PATH = "/path/to/ssh/key"     # Replace with path to your private key
+    REMOTE_HOST = "192.168.83.130"  # Replace with your remote host
+    USERNAME = "rocky"        # Replace with your SSH username
+    KEY_PATH = "/home/rocky/.ssh/id_ed25519"     # Replace with path to your private key
     
     # Task 1: Check system info
     check_system = PythonOperator(
