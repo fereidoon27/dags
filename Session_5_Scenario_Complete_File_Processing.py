@@ -1,166 +1,111 @@
-# file_processing_dag.py
+# simple_file_dag.py
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 import paramiko
-import os
 
-# Configuration - Change these values for your setup
-CONFIG = {
-    'vm2_host': '192.168.83.132',  # FTP server
-    'vm3_host': '192.168.83.133',  # Processing server
-    'username': 'your_username',   # Same username on both VMs
-    'ssh_key_path': '/home/rocky/.ssh/id_rsa',  # SSH key path on VM1
-    'base_dirs': ['in', 'bon/in', 'card/in'],   # Directories to scan for files
-}
+# Simple configuration
+VM2_HOST = '192.168.83.132'
+VM3_HOST = '192.168.83.133'  
+USERNAME = 'rocky'
+SSH_KEY = '/home/rocky/.ssh/id_ed25519'  # PRIVATE key, not .pub
 
-def ssh_execute_command(host, username, key_path, command):
-    """Execute command on remote host via SSH"""
-    ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+def run_ssh_command(host, command):
+    """Run command on remote host"""
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     
     try:
-        # Connect to remote host
-        ssh_client.connect(hostname=host, username=username, key_filename=key_path)
+        # Connect with private key
+        ssh.connect(hostname=host, username=USERNAME, key_filename=SSH_KEY)
         
-        # Execute command
-        stdin, stdout, stderr = ssh_client.exec_command(command)
+        # Run command
+        stdin, stdout, stderr = ssh.exec_command(command)
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
         
-        # Get results
-        output = stdout.read().decode('utf-8').strip()
-        error = stderr.read().decode('utf-8').strip()
-        exit_code = stdout.channel.recv_exit_status()
-        
-        if exit_code != 0 and error:
-            raise Exception(f"Command failed: {error}")
+        if error:
+            print(f"Error: {error}")
+            return None
         
         return output
     
-    finally:
-        ssh_client.close()
-
-def discover_files(**context):
-    """Discover all .txt files in the specified directories on VM2"""
-    files_found = []
-    
-    # Command to find all .txt files in the specified directories
-    find_command = f"find /home/{CONFIG['username']} -name '*.txt' -path '*/in/*' -type f"
-    
-    try:
-        # Execute find command on VM2
-        output = ssh_execute_command(
-            CONFIG['vm2_host'], 
-            CONFIG['username'], 
-            CONFIG['ssh_key_path'], 
-            find_command
-        )
-        
-        # Parse output to get list of files
-        if output:
-            files_found = output.split('\n')
-            files_found = [f.strip() for f in files_found if f.strip()]
-        
-        print(f"Found {len(files_found)} files to process:")
-        for file_path in files_found:
-            print(f"  - {file_path}")
-        
-        # Store file list in XCom for other tasks
-        return files_found
-    
     except Exception as e:
-        print(f"Error discovering files: {e}")
+        print(f"SSH Error: {e}")
+        return None
+    
+    finally:
+        ssh.close()
+
+def find_files(**context):
+    """Find txt files on VM2"""
+    command = f"find /home/{USERNAME} -name '*.txt' -path '*/in/*'"
+    result = run_ssh_command(VM2_HOST, command)
+    
+    if result:
+        files = result.split('\n')
+        print(f"Found files: {files}")
+        return files
+    else:
+        print("No files found")
         return []
 
-def transfer_file(source_file, **context):
-    """Transfer a single file from VM2 to VM3"""
-    try:
-        # Use SCP command to transfer file
-        scp_command = f"scp -i {CONFIG['ssh_key_path']} {CONFIG['username']}@{CONFIG['vm2_host']}:{source_file} {CONFIG['username']}@{CONFIG['vm3_host']}:{source_file}"
+def copy_and_process(**context):
+    """Copy files from VM2 to VM3 and process them"""
+    # Get file list from previous task
+    files = context['task_instance'].xcom_pull(task_ids='find_files')
+    
+    if not files:
+        print("No files to process")
+        return
+    
+    for file_path in files:
+        print(f"Processing: {file_path}")
         
-        # Execute SCP from VM1 (this machine)
-        result = os.system(scp_command)
+        # Step 1: Copy file from VM2 to VM3
+        copy_cmd = f"scp -i {SSH_KEY} {USERNAME}@{VM2_HOST}:{file_path} {USERNAME}@{VM3_HOST}:{file_path}"
+        copy_result = os.system(copy_cmd)
         
-        if result == 0:
-            print(f"Successfully transferred: {source_file}")
-            return True
+        if copy_result == 0:
+            print(f"File copied successfully: {file_path}")
+            
+            # Step 2: Process file on VM3
+            process_cmd = f"python3 /home/{USERNAME}/scripts/simple_file_manager.py {file_path}"
+            process_result = run_ssh_command(VM3_HOST, process_cmd)
+            
+            if process_result:
+                print(f"Processing result: {process_result}")
+            else:
+                print(f"Processing failed for: {file_path}")
         else:
-            raise Exception(f"SCP command failed with exit code {result}")
-    
-    except Exception as e:
-        print(f"Error transferring {source_file}: {e}")
-        return False
+            print(f"Copy failed for: {file_path}")
 
-def process_file_on_vm3(file_path, **context):
-    """Process the transferred file using file_manager.py on VM3"""
-    try:
-        # Command to run file_manager.py on VM3
-        process_command = f"python3 /home/{CONFIG['username']}/scripts/file_manager.py {file_path}"
-        
-        # Execute processing command on VM3
-        result = ssh_execute_command(
-            CONFIG['vm3_host'],
-            CONFIG['username'], 
-            CONFIG['ssh_key_path'],
-            process_command
-        )
-        
-        print(f"Processing result for {file_path}:")
-        print(result)
-        
-        return True
-    
-    except Exception as e:
-        print(f"Error processing {file_path}: {e}")
-        return False
-
-# Define the DAG
+# Simple DAG
 with DAG(
-    'file_processing_workflow',
+    'simple_file_processing',
     default_args={
-        'owner': 'your_name',
+        'owner': 'rocky',
         'retries': 1,
         'retry_delay': timedelta(minutes=5),
     },
-    description='Hourly file processing from VM2 to VM3',
-    schedule_interval='@hourly',  # Run every hour
+    description='Simple file processing workflow',
+    schedule_interval='@hourly',
     start_date=datetime(2024, 5, 1),
     catchup=False,
 ) as dag:
 
-    # Task 1: Discover files on VM2
-    discover_task = PythonOperator(
-        task_id='discover_files',
-        python_callable=discover_files,
+    # Task 1: Find files on VM2
+    find_task = PythonOperator(
+        task_id='find_files',
+        python_callable=find_files,
     )
 
-    # Task 2: Create dynamic tasks for each file found
-    # This will be created dynamically based on discovered files
-    def create_file_processing_tasks(**context):
-        """Create processing tasks for each discovered file"""
-        # Get file list from discover task
-        files = context['task_instance'].xcom_pull(task_ids='discover_files')
-        
-        if not files:
-            print("No files found to process")
-            return
-        
-        # Process each file (in this simplified version, we'll process them sequentially)
-        for file_path in files:
-            print(f"\n--- Processing {file_path} ---")
-            
-            # Step 1: Transfer file
-            if transfer_file(file_path, **context):
-                # Step 2: Process file on VM3
-                process_file_on_vm3(file_path, **context)
-            else:
-                print(f"Skipping processing of {file_path} due to transfer failure")
-
-    # Combined task for transfer and processing
-    process_files_task = PythonOperator(
-        task_id='process_all_files',
-        python_callable=create_file_processing_tasks,
+    # Task 2: Copy and process files
+    process_task = PythonOperator(
+        task_id='copy_and_process',
+        python_callable=copy_and_process,
         provide_context=True,
     )
 
-    # Set task dependencies
-    discover_task >> process_files_task
+    # Set dependency
+    find_task >> process_task
