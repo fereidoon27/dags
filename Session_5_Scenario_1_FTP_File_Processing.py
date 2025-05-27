@@ -10,7 +10,7 @@ VM2_HOST = '192.168.83.132'    # FTP server (source)
 VM3_HOST = '192.168.83.133'    # Processing server (destination)
 USERNAME = 'rocky'
 SSH_KEY = '/home/rocky/.ssh/id_ed25519'
-FTP_PASSWORD = 'your_ftp_password'
+FTP_PASSWORD = '111'
 
 def run_ssh_command(host, command):
     """Execute a command on a remote host via SSH"""
