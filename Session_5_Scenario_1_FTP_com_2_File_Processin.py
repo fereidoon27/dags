@@ -19,7 +19,7 @@ VM3_USERNAME = 'rocky'             # Username on VM3 (processing server)
 
 # Authentication details
 SSH_KEY = '/home/rocky/.ssh/id_ed25519'    # SSH private key path
-FTP_PASSWORD = 'your_ftp_password'         # FTP password for VM2
+FTP_PASSWORD = '111'         # FTP password for VM2
 
 # File paths to process (hardcoded list - no discovery needed)
 FILE_PATHS_TO_PROCESS = [
