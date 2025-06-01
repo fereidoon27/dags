@@ -65,7 +65,7 @@ def get_file_size(host, username, file_path):
 @dag(
     dag_id='taskflow_ftp_processing',
     description='File processing using TaskFlow API',
-    schedule_interval='@hourly',
+    schedule_interval='None',
     start_date=datetime(2024, 5, 1),
     catchup=False,
     default_args={
