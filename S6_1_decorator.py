@@ -25,7 +25,7 @@ VM3_HOST = '192.168.83.133'              # IP address of processing server (dest
 VM2_USERNAME = 'rocky'                   # Username on VM2 (FTP server)
 VM3_USERNAME = 'rocky'                   # Username on VM3 (processing server)
 SSH_KEY = '/home/rocky/.ssh/id_ed25519'  # Path to SSH private key for authentication
-FTP_PASSWORD = 'your_ftp_password'       # Password for FTP login on VM2
+FTP_PASSWORD = '111'       # Password for FTP login on VM2
 
 # FILE MAPPING CONFIGURATION
 # These two lists must have the same number of elements
