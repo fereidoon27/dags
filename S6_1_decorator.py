@@ -70,8 +70,7 @@ def get_file_size(host, username, file_path):
     catchup=False,
     default_args={
         'owner': 'rocky',
-        'retries': 1,
-        'retry_delay': timedelta(minutes=5),
+        'retries': 0,
     },
     tags=['taskflow', 'ftp', 'file-processing']
 )
