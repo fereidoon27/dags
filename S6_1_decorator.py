@@ -10,7 +10,7 @@ VM3_HOST = '192.168.83.133'
 VM2_USERNAME = 'rocky'
 VM3_USERNAME = 'rocky'
 SSH_KEY = '/home/rocky/.ssh/id_ed25519'
-FTP_PASSWORD = 'your_ftp_password'
+FTP_PASSWORD = '111'
 
 # Source and destination mapping (same index = paired files)
 SOURCE_PATHS = [
