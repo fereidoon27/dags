@@ -1,12 +1,11 @@
-# ftp_pr_1_with_sensor.py
+# simple_taskflow_dag_with_sensor.py
 from datetime import datetime, timedelta
 import os
 import paramiko
 from airflow.decorators import dag, task
-from airflow.sensors.base import BaseSensorOperator
-from airflow.utils.context import Context
+from airflow.sensors.base import PokeReturnValue
 
-# Config (with your updates in mind)
+# Config (updated from your requirements)
 VM2_HOST = '192.168.83.132'
 VM3_HOST = '192.168.83.133'
 VM2_USERNAME = 'rocky'
@@ -14,8 +13,9 @@ VM3_USERNAME = 'rocky'
 SSH_KEY = '/home/rocky/.ssh/id_ed25519'
 FTP_PASSWORD = '111'
 
-# Source directories to monitor for new .txt files
-SOURCE_DIRS = ['/home/rocky/in', '/home/rocky/bon/in', '/home/rocky/card/in']
+# Files to monitor and process (same files for both sensor and processing)
+SOURCE_PATHS = ['/home/rocky/in/sample1.txt', '/home/rocky/bon/in/sample3.txt']
+DEST_PATHS = ['/home/rocky/in/sample1.txt', '/home/rocky/bon/in/sample3.txt']
 
 def ssh_run(host, user, cmd):
     """Run SSH command"""
@@ -38,61 +38,55 @@ def file_size(host, user, path):
         return None
 
 @dag(
-    dag_id='ftp_pr_1_with_sensor',
-    schedule_interval=None,  # Sensor-driven, not time-based
+    dag_id='sensor_ftp_processing',
+    schedule_interval=None,  # Triggered by sensor
     start_date=datetime(2024, 5, 1),
     catchup=False,
     default_args={'owner': 'rocky', 'retries': 0}
 )
 def sensor_workflow():
     
-    @task.sensor(poke_interval=30, timeout=300, mode="poke")
-    def file_sensor():
-        """Check for new .txt files in source directories"""
-        found_files = []
+    @task.sensor(poke_interval=120, timeout=3600, mode="poke")
+    def wait_for_source_files():
+        """Check if any source file exists on VM2"""
+        detected_files = []
         
-        for source_dir in SOURCE_DIRS:
-            try:
-                # Find all .txt files in this directory
-                find_cmd = f"find {source_dir} -name '*.txt' -type f -newermt '1 minute ago' 2>/dev/null || true"
-                result = ssh_run(VM2_HOST, VM2_USERNAME, find_cmd)
-                
-                if result:
-                    new_files = [f.strip() for f in result.split('\n') if f.strip()]
-                    found_files.extend(new_files)
-            except:
-                continue
+        for src_path in SOURCE_PATHS:
+            if file_size(VM2_HOST, VM2_USERNAME, src_path) is not None:
+                detected_files.append(src_path)
         
-        if found_files:
-            print(f"Found new files: {found_files}")
-            return found_files
-        
-        return False  # Keep sensor running
+        if detected_files:
+            print(f"Detected files: {detected_files}")
+            return PokeReturnValue(is_done=True, xcom_value=detected_files)
+        else:
+            print("No source files detected yet")
+            return PokeReturnValue(is_done=False)
     
     @task
-    def transfer_files(detected_files: list):
-        """Transfer detected files via FTP"""
+    def transfer_detected_files(detected_files: list):
+        """Transfer only the detected files"""
         transferred = []
         
-        for src in detected_files:
-            # Use same path on destination
-            dst = src
+        for src_path in detected_files:
+            # Find corresponding destination path
+            src_index = SOURCE_PATHS.index(src_path)
+            dst_path = DEST_PATHS[src_index]
             
             # Check sizes
-            src_size = file_size(VM2_HOST, VM2_USERNAME, src)
-            dst_size = file_size(VM3_HOST, VM3_USERNAME, dst)
+            src_size = file_size(VM2_HOST, VM2_USERNAME, src_path)
+            dst_size = file_size(VM3_HOST, VM3_USERNAME, dst_path)
             
             if dst_size == src_size:
-                transferred.append(dst)
+                transferred.append(dst_path)
                 continue
             elif dst_size is not None:
-                raise Exception(f"Size mismatch: {src}")
+                raise Exception(f"Size mismatch: {src_path}")
             
             # Transfer
-            ssh_run(VM3_HOST, VM3_USERNAME, f"mkdir -p {os.path.dirname(dst)}")
-            ftp_cmd = f"lftp -u {VM2_USERNAME},{FTP_PASSWORD} {VM2_HOST} -e 'get {src} -o {dst}; quit'"
+            ssh_run(VM3_HOST, VM3_USERNAME, f"mkdir -p {os.path.dirname(dst_path)}")
+            ftp_cmd = f"lftp -u {VM2_USERNAME},{FTP_PASSWORD} {VM2_HOST} -e 'get {src_path} -o {dst_path}; quit'"
             ssh_run(VM3_HOST, VM3_USERNAME, ftp_cmd)
-            transferred.append(dst)
+            transferred.append(dst_path)
         
         return transferred
     
@@ -118,10 +112,10 @@ def sensor_workflow():
         
         return len(files)
     
-    # Workflow with sensor
-    detected_files = file_sensor()
-    files = transfer_files(detected_files)
-    checked = check_processing(files)
+    # Workflow: sensor detects -> transfer -> check -> process
+    detected = wait_for_source_files()
+    transferred = transfer_detected_files(detected)
+    checked = check_processing(transferred)
     result = process_files(checked)
     
     return result
