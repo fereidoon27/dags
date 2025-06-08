@@ -1,87 +1,103 @@
-# simple_remote_dag.py - Simple remote execution
+# simple_remote_dag.py - Fixed: Direct SSH execution (no nested Celery)
 
 from datetime import datetime, timedelta
 from airflow.decorators import dag, task
-from celery import Celery
+import sys
+import os
 
-# Initialize Celery app
-celery_app = Celery('simple_remote_tasks')
-celery_app.config_from_object('airflow.providers.celery.executors.default_celery')
+# Add airflow directory to Python path
+sys.path.insert(0, '/home/rocky/airflow')
 
 @dag(
-    dag_id='simple_remote_execution',
+    dag_id='simple_remote_execution_fixed',
     schedule_interval=None,
     start_date=datetime(2024, 5, 1),
     catchup=False,
     default_args={'owner': 'rocky', 'retries': 0}
 )
-def simple_remote_workflow():
+def simple_remote_workflow_fixed():
     
     @task
     def get_hostname():
-        """Get hostname from VM1"""
+        """Get hostname from VM1 - Direct SSH execution"""
         
-        # Send task to any available worker
-        task_result = celery_app.send_task(
-            'simple_remote_tasks.run_command',
-            args=['vm1', 'hostname'],
-            queue='remote_tasks'
-        )
+        # Import our SSH utility directly
+        from utils.simple_ssh import execute_ssh_command
         
-        return task_result.get(timeout=60)
+        # Execute SSH command directly (no nested Celery call)
+        result = execute_ssh_command('vm1', 'hostname')
+        print(f"Hostname result: {result}")
+        
+        return result
     
     @task
     def make_directory():
-        """Create a directory on VM1"""
+        """Create a directory on VM1 - Direct SSH execution"""
         
-        task_result = celery_app.send_task(
-            'simple_remote_tasks.run_command',
-            args=['vm1', 'mkdir -p /tmp/airflow_test && echo "Directory created"'],
-            queue='remote_tasks'
-        )
+        from utils.simple_ssh import execute_ssh_command
         
-        return task_result.get(timeout=60)
+        result = execute_ssh_command('vm1', 'mkdir -p /tmp/airflow_test && echo "Directory created"')
+        print(f"Directory creation result: {result}")
+        
+        return result
     
     @task
     def check_directory():
-        """Check if directory exists on VM1"""
+        """Check if directory exists on VM1 - Direct SSH execution"""
         
-        task_result = celery_app.send_task(
-            'simple_remote_tasks.run_command',
-            args=['vm1', 'ls -la /tmp/airflow_test'],
-            queue='remote_tasks'
-        )
+        from utils.simple_ssh import execute_ssh_command
         
-        return task_result.get(timeout=60)
+        result = execute_ssh_command('vm1', 'ls -la /tmp/airflow_test')
+        print(f"Directory check result: {result}")
+        
+        return result
     
     @task
     def get_vm_status():
-        """Get comprehensive VM status"""
+        """Get comprehensive VM status - Direct SSH execution"""
         
-        task_result = celery_app.send_task(
-            'simple_remote_tasks.check_vm_status',
-            args=['vm1'],
-            queue='remote_tasks'
-        )
+        from utils.simple_ssh import execute_ssh_command
         
-        return task_result.get(timeout=120)
+        # Execute multiple commands and collect results
+        commands = {
+            'hostname': 'hostname',
+            'uptime': 'uptime', 
+            'disk': 'df -h /',
+            'date': 'date'
+        }
+        
+        results = {}
+        
+        for check_name, command in commands.items():
+            try:
+                result = execute_ssh_command('vm1', command)
+                results[check_name] = result['output']
+                print(f"{check_name}: {result['output']}")
+            except Exception as e:
+                results[check_name] = f"ERROR: {str(e)}"
+                print(f"{check_name} failed: {e}")
+        
+        return {
+            'vm': 'vm1',
+            'checks': results
+        }
     
     @task
     def cleanup():
-        """Clean up test directory"""
+        """Clean up test directory - Direct SSH execution"""
         
-        task_result = celery_app.send_task(
-            'simple_remote_tasks.run_command',
-            args=['vm1', 'rm -rf /tmp/airflow_test && echo "Cleanup done"'],
-            queue='remote_tasks'
-        )
+        from utils.simple_ssh import execute_ssh_command
         
-        return task_result.get(timeout=60)
+        result = execute_ssh_command('vm1', 'rm -rf /tmp/airflow_test && echo "Cleanup done"')
+        print(f"Cleanup result: {result}")
+        
+        return result
     
-    # Simple workflow
+    # Define workflow - tasks execute directly on Airflow workers
+    # Each task makes its own SSH connection to VM1
     hostname = get_hostname()
     directory = make_directory()
-    check_dir = check_directory()
+    check_dir = check_directory() 
     status = get_vm_status()
     clean = cleanup()
     
@@ -89,4 +105,4 @@ def simple_remote_workflow():
     hostname >> directory >> check_dir >> status >> clean
 
 # Create DAG
-dag_instance = simple_remote_workflow()
+dag_instance = simple_remote_workflow_fixed()
