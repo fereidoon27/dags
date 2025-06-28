@@ -38,7 +38,7 @@ def file_size(host, user, path):
         return None
 
 @dag(
-    dag_id='sensor_ftp_processing',
+    dag_id='S06_02_sensor_ftp_processing',
     schedule_interval=None,  # Triggered by sensor
     start_date=datetime(2024, 5, 1),
     catchup=False,
