@@ -96,7 +96,7 @@ def copy_and_process(**context):
 
 # Simple DAG
 with DAG(
-    'simple_file_processing',
+    'S05_05_improved_scp_file_processing',
     default_args={
         'owner': 'rocky',
         'retries': 1,
