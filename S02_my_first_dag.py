@@ -15,7 +15,7 @@ default_args = {
 
 # Create the DAG
 with DAG(
-    'my_first_dag',
+    'S02_my_first_dag',
     default_args=default_args,
     description='My first Airflow DAG',
     schedule_interval=timedelta(days=1),  # Run daily
