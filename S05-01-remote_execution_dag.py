@@ -5,7 +5,7 @@ from airflow.providers.ssh.operators.ssh import SSHOperator
 from airflow.operators.bash import BashOperator
 
 with DAG(
-    'remote_execution_dag',
+    'S05-01-remote_execution_dag',
     default_args={
         'owner': 'your_name',
         'retries': 1,
