@@ -273,7 +273,7 @@ def process_files(**context):
 # =============================================================================
 
 with DAG(
-    'improved_ftp_file_processing',
+    'S05_07_improved_ftp_file_processing',
     default_args={
         'owner': 'rocky',
         'retries': 1,
