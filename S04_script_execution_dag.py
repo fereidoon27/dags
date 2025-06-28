@@ -4,7 +4,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 
 with DAG(
-    'script_execution_dag',
+    'S04_script_execution_dag',
     default_args={
         'owner': 'your_name',
         'retries': 1,
