@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, '/home/rocky/airflow')
 
 @dag(
-    dag_id='simple_remote_execution_fixed',
+    dag_id='S07_Scenario_01_Celery_1vm_Simple_remote',
     schedule_interval=None,
     start_date=datetime(2024, 5, 1),
     catchup=False,
