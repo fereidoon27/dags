@@ -117,7 +117,7 @@ with DAG(
     
     # Define remote connection parameters
     # For security, these could be stored in Airflow Variables or Connections
-    REMOTE_HOST = "192.168.83.130"  # Replace with your remote host
+    REMOTE_HOST = "192.168.83.133"  # Replace with your remote host
     USERNAME = "rocky"        # Replace with your SSH username
     KEY_PATH = "/home/rocky/.ssh/id_ed25519"     # Replace with path to your private key
     
