@@ -5,7 +5,7 @@ import time
 import random
 
 @dag(
-    dag_id='concurrency_visual_demo',
+    dag_id='S08_01_concurrency_visual_demo',
     schedule_interval=None,
     start_date=datetime(2024, 1, 1),
     catchup=False,
