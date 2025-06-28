@@ -42,7 +42,7 @@ def check_results(**context):
 
 # DAG definition
 with DAG(
-    'python_functions_dag',
+    'S03_python_functions_dag',
     default_args={
         'owner': 'your_name',
         'retries': 1,
