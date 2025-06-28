@@ -103,7 +103,7 @@ def verify_script_output(remote_host, username, key_path, **context):
 
 # DAG definition
 with DAG(
-    'paramiko_ssh_dag',
+    'S05_03_paramiko_ssh_dag',
     default_args={
         'owner': 'your_name',
         'retries': 1,
