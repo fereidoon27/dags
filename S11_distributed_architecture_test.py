@@ -1,108 +1,158 @@
-# simple_remote_dag.py - Fixed: Direct SSH execution (no nested Celery)
-
 from datetime import datetime, timedelta
 from airflow.decorators import dag, task
-import sys
+import socket
 import os
-
-# Add airflow directory to Python path
-sys.path.insert(0, '/home/rocky/airflow')
+import subprocess
 
 @dag(
-    dag_id='S07_Scenario_01_Celery_1vm_Simple_remote',
+    dag_id='S11_distributed_architecture_test',
     schedule_interval=None,
-    start_date=datetime(2024, 5, 1),
+    start_date=datetime(2024, 1, 1),
     catchup=False,
-    default_args={'owner': 'rocky', 'retries': 0}
+    default_args={
+        'owner': 'rocky',
+        'retries': 0
+    }
 )
-def simple_remote_workflow_fixed():
+def distributed_architecture_test():
     
     @task
-    def get_hostname():
-        """Get hostname from VM1 - Direct SSH execution"""
+    def show_worker_info():
+        """Display information about the worker executing this task"""
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
         
-        # Import our SSH utility directly
-        from utils.simple_ssh import execute_ssh_command
+        # Get worker process info
+        pid = os.getpid()
+        uid = os.getuid()
         
-        # Execute SSH command directly (no nested Celery call)
-        result = execute_ssh_command('vm1', 'hostname')
-        print(f"Hostname result: {result}")
+        # Check if logs directory is accessible
+        log_dir = '/home/rocky/airflow/logs'
+        log_accessible = os.path.exists(log_dir) and os.access(log_dir, os.W_OK)
         
-        return result
-    
-    @task
-    def make_directory():
-        """Create a directory on VM1 - Direct SSH execution"""
-        
-        from utils.simple_ssh import execute_ssh_command
-        
-        result = execute_ssh_command('vm1', 'mkdir -p /tmp/airflow_test && echo "Directory created"')
-        print(f"Directory creation result: {result}")
-        
-        return result
-    
-    @task
-    def check_directory():
-        """Check if directory exists on VM1 - Direct SSH execution"""
-        
-        from utils.simple_ssh import execute_ssh_command
-        
-        result = execute_ssh_command('vm1', 'ls -la /tmp/airflow_test')
-        print(f"Directory check result: {result}")
-        
-        return result
-    
-    @task
-    def get_vm_status():
-        """Get comprehensive VM status - Direct SSH execution"""
-        
-        from utils.simple_ssh import execute_ssh_command
-        
-        # Execute multiple commands and collect results
-        commands = {
-            'hostname': 'hostname',
-            'uptime': 'uptime', 
-            'disk': 'df -h /',
-            'date': 'date'
+        return {
+            'worker_hostname': hostname,
+            'worker_ip': ip,
+            'process_id': pid,
+            'user_id': uid,
+            'airflow_home': os.environ.get('AIRFLOW_HOME', 'Not set'),
+            'python_path': os.environ.get('PYTHONPATH', 'Not set'),
+            'logs_writable': log_accessible,
+            'current_directory': os.getcwd()
         }
+    
+    @task
+    def check_nfs_mount():
+        """Verify NFS mount is working"""
+        dags_path = '/home/rocky/airflow/dags'
+        
+        # List files in DAGs folder
+        try:
+            files = os.listdir(dags_path)
+            dag_files = [f for f in files if f.endswith('.py')]
+            
+            # Check if this DAG file exists
+            this_dag = 'S11_distributed_architecture_test.py'
+            has_this_dag = this_dag in dag_files
+            
+            return {
+                'nfs_mounted': True,
+                'dags_path': dags_path,
+                'total_files': len(files),
+                'dag_files': len(dag_files),
+                'has_this_dag': has_this_dag,
+                'mount_info': subprocess.check_output(['mount | grep airflow'], shell=True).decode().strip()
+            }
+        except Exception as e:
+            return {
+                'nfs_mounted': False,
+                'error': str(e)
+            }
+    
+    @task
+    def test_ssh_connections():
+        """Test SSH connectivity to all target VMs"""
+        import sys
+        sys.path.insert(0, '/home/rocky/airflow')
         
         results = {}
         
-        for check_name, command in commands.items():
-            try:
-                result = execute_ssh_command('vm1', command)
-                results[check_name] = result['output']
-                print(f"{check_name}: {result['output']}")
-            except Exception as e:
-                results[check_name] = f"ERROR: {str(e)}"
-                print(f"{check_name} failed: {e}")
-        
-        return {
-            'vm': 'vm1',
-            'checks': results
-        }
+        try:
+            from utils.simple_ssh import execute_ssh_command
+            
+            # Test SSH to each configured VM
+            from config.simple_vms import TARGET_VMS
+            
+            for vm_name, vm_config in TARGET_VMS.items():
+                try:
+                    result = execute_ssh_command(vm_name, 'hostname')
+                    results[vm_name] = {
+                        'success': True,
+                        'hostname': result['output'],
+                        'host': vm_config['host']
+                    }
+                except Exception as e:
+                    results[vm_name] = {
+                        'success': False,
+                        'error': str(e),
+                        'host': vm_config['host']
+                    }
+                    
+        except Exception as e:
+            results['import_error'] = str(e)
+            
+        return results
     
     @task
-    def cleanup():
-        """Clean up test directory - Direct SSH execution"""
-        
-        from utils.simple_ssh import execute_ssh_command
-        
-        result = execute_ssh_command('vm1', 'rm -rf /tmp/airflow_test && echo "Cleanup done"')
-        print(f"Cleanup result: {result}")
-        
-        return result
+    def verify_log_server():
+        """Check if log server is running on port 8793"""
+        try:
+            # Check if port 8793 is listening
+            result = subprocess.check_output(['ss', '-tln', '| grep :8793'], shell=True).decode()
+            
+            return {
+                'log_server_running': True,
+                'port_info': result.strip()
+            }
+        except:
+            return {
+                'log_server_running': False,
+                'message': 'Port 8793 not listening'
+            }
     
-    # Define workflow - tasks execute directly on Airflow workers
-    # Each task makes its own SSH connection to VM1
-    hostname = get_hostname()
-    directory = make_directory()
-    check_dir = check_directory() 
-    status = get_vm_status()
-    clean = cleanup()
+    @task
+    def summarize_results(worker_info, nfs_info, ssh_results, log_server):
+        """Summarize all test results"""
+        print("=== DISTRIBUTED ARCHITECTURE TEST RESULTS ===")
+        
+        print(f"\n1. WORKER INFORMATION:")
+        print(f"   - Hostname: {worker_info['worker_hostname']}")
+        print(f"   - IP: {worker_info['worker_ip']}")
+        print(f"   - Logs writable: {worker_info['logs_writable']}")
+        
+        print(f"\n2. NFS MOUNT STATUS:")
+        print(f"   - Mounted: {nfs_info.get('nfs_mounted', False)}")
+        print(f"   - DAG files found: {nfs_info.get('dag_files', 0)}")
+        
+        print(f"\n3. SSH CONNECTIVITY:")
+        for vm, result in ssh_results.items():
+            if vm != 'import_error':
+                status = "✓" if result.get('success') else "✗"
+                print(f"   - {vm} ({result.get('host')}): {status}")
+        
+        print(f"\n4. LOG SERVER:")
+        print(f"   - Running: {log_server['log_server_running']}")
+        
+        return "Test completed"
     
-    # Sequential execution
-    hostname >> directory >> check_dir >> status >> clean
+    # Execute tests
+    worker = show_worker_info()
+    nfs = check_nfs_mount()
+    ssh = test_ssh_connections()
+    logs = verify_log_server()
+    
+    summary = summarize_results(worker, nfs, ssh, logs)
+    
+    [worker, nfs, ssh, logs] >> summary
 
-# Create DAG
-dag_instance = simple_remote_workflow_fixed()
+dag = distributed_architecture_test()
