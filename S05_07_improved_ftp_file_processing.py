@@ -276,8 +276,8 @@ with DAG(
     'S05_07_improved_ftp_file_processing',
     default_args={
         'owner': 'rocky',
-        'retries': 1,
-        'retry_delay': timedelta(minutes=5),
+        #'retries': 1,
+        #'retry_delay': timedelta(minutes=5),
     },
     description='Improved FTP file processing with existence checks',
     schedule_interval='@hourly',
