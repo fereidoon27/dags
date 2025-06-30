@@ -3,7 +3,7 @@ from airflow.decorators import dag, task
 import socket
 
 @dag(
-    dag_id='distributed_system_test',
+    dag_id='S10_distributed_system_test',
     schedule=None,
     start_date=datetime(2024, 1, 1),
     catchup=False,
