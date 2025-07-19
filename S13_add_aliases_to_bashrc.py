@@ -17,9 +17,20 @@ SSH_TIMEOUT = 30
 
 # Target VMs configuration
 TARGET_VMS = [
+    {'ip': '192.168.83.129', 'hostname': 'airflow'},
+    {'ip': '192.168.83.152', 'hostname': 'airflow2'},
+    {'ip': '192.168.83.132', 'hostname': 'ftp'},
     {'ip': '192.168.83.150', 'hostname': 'nfs2'},
+    {'ip': '192.168.83.200', 'hostname': 'nfs-cluster'},
+    {'ip': '192.168.83.133', 'hostname': 'card1'},
+    {'ip': '192.168.83.131', 'hostname': 'worker1'},
+    {'ip': '192.168.83.153', 'hostname': 'worker2'},
     {'ip': '192.168.83.141', 'hostname': 'mq1'},
-
+    {'ip': '192.168.83.142', 'hostname': 'mq2'},
+    {'ip': '192.168.83.138', 'hostname': 'mq3'},
+    {'ip': '192.168.83.148', 'hostname': 'sql1'},
+    {'ip': '192.168.83.147', 'hostname': 'sql2'},
+    {'ip': '192.168.83.149', 'hostname': 'sql3'},
 ]
 
 # Aliases to add (each line will be added to .bashrc)
