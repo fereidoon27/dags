@@ -144,6 +144,10 @@ def extract_alias_name(alias_line):
         return alias_name
     return None
 
+# Marker comments to detect if aliases section already exists
+START_MARKER = "# === Airflow Management Aliases (Added by DAG) ==="
+END_MARKER = "# === End of Airflow Management Aliases ==="
+
 # =============================================================================
 # DAG DEFINITION
 # =============================================================================
@@ -187,39 +191,61 @@ def add_aliases_workflow():
                 current_bashrc = ""
                 print("⚠ .bashrc not found, will create new one")
             
-            # Find existing alias names in .bashrc
+            # Check if our aliases section already exists
+            if START_MARKER in current_bashrc and END_MARKER in current_bashrc:
+                print("✓ Airflow aliases section already exists in .bashrc")
+                print("✓ No changes needed - skipping to avoid duplicates")
+                
+                # Count existing aliases in our section
+                existing_count = 0
+                in_our_section = False
+                for line in current_bashrc.split('\n'):
+                    if START_MARKER in line:
+                        in_our_section = True
+                        continue
+                    elif END_MARKER in line:
+                        in_our_section = False
+                        continue
+                    elif in_our_section and extract_alias_name(line):
+                        existing_count += 1
+                
+                return {
+                    'vm': vm_hostname,
+                    'ip': vm_ip,
+                    'status': 'success',
+                    'action': 'already_exists',
+                    'added': 0,
+                    'skipped': existing_count,
+                    'message': 'Aliases section already exists'
+                }
+            
+            # Find existing alias names in .bashrc (outside our section)
             existing_aliases = set()
             for line in current_bashrc.split('\n'):
                 alias_name = extract_alias_name(line)
                 if alias_name:
                     existing_aliases.add(alias_name)
             
-            print(f"Found {len(existing_aliases)} existing aliases: {sorted(existing_aliases)}")
+            print(f"Found {len(existing_aliases)} existing aliases in .bashrc")
             
-            # Determine which aliases to add
-            aliases_to_add = []
-            skipped_count = 0
-            
+            # Count aliases that would conflict
+            conflicting_aliases = []
             for alias_line in ALIASES_TO_ADD:
                 alias_name = extract_alias_name(alias_line)
-                
                 if alias_name and alias_name in existing_aliases:
-                    print(f"⚠ Skipping existing alias: {alias_name}")
-                    skipped_count += 1
-                else:
-                    aliases_to_add.append(alias_line)
+                    conflicting_aliases.append(alias_name)
             
-            print(f"Will add {len(aliases_to_add)} new lines, skipped {skipped_count} existing aliases")
-            
-            if not aliases_to_add:
-                print("✓ All aliases already exist, no changes needed")
+            if conflicting_aliases:
+                print(f"⚠ Found {len(conflicting_aliases)} conflicting aliases: {conflicting_aliases}")
+                print("⚠ Will skip adding to avoid conflicts")
                 return {
                     'vm': vm_hostname,
                     'ip': vm_ip,
                     'status': 'success',
-                    'action': 'no_changes',
+                    'action': 'conflicts_detected',
                     'added': 0,
-                    'skipped': skipped_count
+                    'skipped': len(conflicting_aliases),
+                    'conflicts': conflicting_aliases
                 }
             
             # Create backup of .bashrc
@@ -227,54 +253,33 @@ def add_aliases_workflow():
             execute_ssh_command(ssh, backup_cmd)
             print("✓ Created .bashrc backup")
             
-            # Prepare new aliases content
-            new_aliases_content = '\n\n# === Airflow Management Aliases (Added by DAG) ===\n'
-            new_aliases_content += '\n'.join(aliases_to_add)
-            new_aliases_content += '\n# === End of Airflow Management Aliases ===\n'
+            # Add new aliases section to .bashrc
+            print("Adding aliases section to .bashrc...")
             
-            # Append new aliases to .bashrc using echo commands
-            # This approach avoids issues with special characters
-            print("Adding new aliases to .bashrc...")
-            
-            # Add separator comment first
+            # Add the complete section
             execute_ssh_command(ssh, f"echo '' >> ~/.bashrc")
-            execute_ssh_command(ssh, f"echo '# === Airflow Management Aliases (Added by DAG) ===' >> ~/.bashrc")
+            execute_ssh_command(ssh, f"echo '{START_MARKER}' >> ~/.bashrc")
             
             added_count = 0
-            for alias_line in aliases_to_add:
+            for alias_line in ALIASES_TO_ADD:
                 if alias_line.strip():  # Skip empty lines in echo
                     # Escape single quotes in the alias line
                     escaped_line = alias_line.replace("'", "'\"'\"'")
                     execute_ssh_command(ssh, f"echo '{escaped_line}' >> ~/.bashrc")
-                    added_count += 1
+                    if extract_alias_name(alias_line):  # Count only actual aliases, not comments
+                        added_count += 1
                 else:
                     execute_ssh_command(ssh, f"echo '' >> ~/.bashrc")
             
-            # Add closing comment
-            execute_ssh_command(ssh, f"echo '# === End of Airflow Management Aliases ===' >> ~/.bashrc")
+            # Add closing marker
+            execute_ssh_command(ssh, f"echo '{END_MARKER}' >> ~/.bashrc")
             
-            print(f"✓ Added {added_count} alias lines to .bashrc")
+            print(f"✓ Added {added_count} aliases to .bashrc")
             
             # Source .bashrc to apply changes
             print("Sourcing .bashrc to apply changes...")
             execute_ssh_command(ssh, "source ~/.bashrc")
             print("✓ .bashrc sourced successfully")
-            
-            # Verify aliases were added
-            print("Verifying aliases were added...")
-            new_bashrc = execute_ssh_command(ssh, "cat ~/.bashrc")
-            
-            # Count how many of our aliases are now present
-            verified_count = 0
-            for alias_line in aliases_to_add:
-                alias_name = extract_alias_name(alias_line)
-                if alias_name:
-                    for line in new_bashrc.split('\n'):
-                        if extract_alias_name(line) == alias_name:
-                            verified_count += 1
-                            break
-            
-            print(f"✓ Verified {verified_count} aliases in updated .bashrc")
             
             return {
                 'vm': vm_hostname,
@@ -282,8 +287,8 @@ def add_aliases_workflow():
                 'status': 'success',
                 'action': 'added_aliases',
                 'added': added_count,
-                'skipped': skipped_count,
-                'verified': verified_count
+                'skipped': 0,
+                'verified': added_count
             }
             
         except Exception as e:
@@ -322,10 +327,16 @@ def add_aliases_workflow():
         if successful_vms:
             print(f"\n--- SUCCESSFUL DEPLOYMENTS ---")
             for result in successful_vms:
-                action_desc = "No changes needed" if result['action'] == 'no_changes' else f"Added {result['added']} aliases"
+                if result['action'] == 'already_exists':
+                    action_desc = f"Already exists ({result['skipped']} aliases)"
+                elif result['action'] == 'conflicts_detected':
+                    action_desc = f"Conflicts detected ({result['skipped']} conflicts)"
+                elif result['action'] == 'added_aliases':
+                    action_desc = f"Added {result['added']} aliases"
+                else:
+                    action_desc = "No changes needed"
+                    
                 print(f"✓ {result['vm']:12} ({result['ip']:15}) - {action_desc}")
-                if result.get('skipped', 0) > 0:
-                    print(f"    Skipped {result['skipped']} existing aliases")
         
         if failed_vms:
             print(f"\n--- FAILED DEPLOYMENTS ---")
@@ -334,11 +345,13 @@ def add_aliases_workflow():
         
         # Calculate totals
         total_added = sum(r.get('added', 0) for r in successful_vms)
-        total_skipped = sum(r.get('skipped', 0) for r in successful_vms)
+        already_exists_count = len([r for r in successful_vms if r['action'] == 'already_exists'])
+        conflicts_count = len([r for r in successful_vms if r['action'] == 'conflicts_detected'])
         
         print(f"\n--- STATISTICS ---")
         print(f"Total aliases added: {total_added}")
-        print(f"Total aliases skipped (already existed): {total_skipped}")
+        print(f"VMs with existing aliases section: {already_exists_count}")
+        print(f"VMs with conflicts detected: {conflicts_count}")
         print(f"Success rate: {len(successful_vms)}/{len(results)} ({100*len(successful_vms)/len(results):.1f}%)")
         
         print("\n" + "="*60)
@@ -348,15 +361,20 @@ def add_aliases_workflow():
             'successful': len(successful_vms),
             'failed': len(failed_vms),
             'total_added': total_added,
-            'total_skipped': total_skipped,
+            'already_exists': already_exists_count,
+            'conflicts': conflicts_count,
             'success_rate': len(successful_vms)/len(results) if results else 0
         }
     
-    # Create tasks for each VM (will run concurrently up to max_active_tasks limit)
+    # Create tasks for each VM with hostname-based task IDs
     vm_results = []
     for vm_config in TARGET_VMS:
-        result = add_aliases_to_vm(vm_config)
-        vm_results.append(result)
+        # Create task with custom task_id based on hostname
+        task_id = f"add_aliases_{vm_config['hostname']}"
+        
+        # Use .override() to set custom task_id
+        vm_task = add_aliases_to_vm.override(task_id=task_id)(vm_config)
+        vm_results.append(vm_task)
     
     # Generate summary report after all VM tasks complete
     summary = generate_summary_report(vm_results)
