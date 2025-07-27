@@ -25,10 +25,11 @@ def ssh_read_file(remote_path):
         client.connect(hostname=VM2_HOST, username=VM2_USERNAME, password=FTP_PASSWORD, key_filename=SSH_KEY)
         sftp = client.open_sftp()
         with sftp.open(remote_path, 'r') as f:
-            contents = f.read().strip()
+            contents = f.read().decode('utf-8').strip()
             return contents
     finally:
         client.close()
+
 
 
 @dag(
