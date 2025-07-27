@@ -20,27 +20,39 @@ from airflow.decorators import dag, task
 def sum_flow():
 
     @task(queue='default')
-    def sum_two_numbers(a: int, b: int) -> int:
-        print(f"=== sum_two_numbers: {a} + {b} ===")
-        result = a + b
-        print(f"Result: {result}")
-        return result
+    def sum_1(nums: list):
+        print("=== sum of numbers in a list ===")
+        if not nums:
+            print("No numbers provided, returning 0")
+            return 0
+        total = sum(nums)
+        print(f"Total sum: {total}")
+        return total
 
-    # Step-by-step dependency logic
-    r1 = sum_two_numbers(2, 2)
-    r2 = sum_two_numbers(3, 3)
-    result_1 = sum_two_numbers.partial().expand(a=[r1], b=[r2])  # result_1 = r1 + r2
+    @task(queue='default')
+    def combine(a: int, b: int):
+        return a + b
 
-    result_2 = sum_two_numbers(4, 4)
-    result_3 = sum_two_numbers.partial().expand(a=[result_2], b=result_1)  # result_3 = result_2 + result_1
+    @task(queue='default')
+    def add_const(value: int, const: int = 2):
+        return value + const
 
-    result_4 = sum_two_numbers.partial().expand(a=result_3, b=[2])  # result_4 = result_3 + 2
+    # Step-by-step execution
+    r1 = sum_1([2, 2])
+    r2 = sum_1([3, 3])
+    result_1 = combine(r1, r2)
 
+    result_2 = sum_1([4, 4])
+    result_3 = combine(result_2, result_1)
+    result_4 = add_const(result_3)
+
+    # Optional: log the result
     @task
-    def print_result(value: int):
-        print(f"Final result: {value}")
+    def print_final(result: int):
+        print(f"Final result: {result}")
 
-    print_result(result_4)
+    print_final(result_4)
 
 
+# DAG instance
 dag_instance = sum_flow()
