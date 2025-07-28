@@ -7,9 +7,9 @@ import random
 @dag(
     dag_id='S08_01_concurrency_visual_demo',
     schedule_interval=None,
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2025, 1, 1),
     catchup=False,
-    max_active_tasks=10,  # DAG-level concurrency limit
+    max_active_tasks=2,  # DAG-level concurrency limit
     default_args={'owner': 'rocky'}
 )
 def concurrency_demo():
