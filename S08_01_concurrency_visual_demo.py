@@ -14,11 +14,11 @@ import random
 )
 def concurrency_demo():
     
-    @task(queue='high_priority')
+    @task(queue='default')
     def simulate_quick_task(task_num):
-        """Simulates a quick task (5-10 seconds)"""
+        """Simulates a quick task (20-30 seconds)"""
         start = datetime.now()
-        duration = random.randint(5, 10)
+        duration = random.randint(20, 30)
         time.sleep(duration)
         end = datetime.now()
         
@@ -27,14 +27,14 @@ def concurrency_demo():
             'start': start.isoformat(),
             'end': end.isoformat(),
             'duration': duration,
-            'queue': 'high_priority'
+            'queue': 'default'
         }
     
     @task(queue='default')
     def simulate_slow_task(task_num):
-        """Simulates a slow task (20-30 seconds)"""
+        """Simulates a slow task (100-110 seconds)"""
         start = datetime.now()
-        duration = random.randint(20, 30)
+        duration = random.randint(100, 110)
         time.sleep(duration)
         end = datetime.now()
         
