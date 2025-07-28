@@ -70,13 +70,13 @@ def get_file_info(host, user, path):
 @dag(
     dag_id='S12_card_processing_workflow',
     schedule_interval=None,  # Triggered by sensor
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     max_active_tasks=5,  # DAG-level concurrency limit
     default_args={
         'owner': 'rocky',
         'retries': 1,
-        'retry_delay': timedelta(minutes=5),
+        'retry_delay': timedelta(minutes=1),
         'queue': 'card_processing_queue'  # Custom queue for all tasks
     },
     tags=['card-processing', 'vm3', 'sensor']
@@ -84,7 +84,7 @@ def get_file_info(host, user, path):
 def card_processing_workflow():
     
     @task.sensor(
-        poke_interval=300,  # Check every 5 minutes
+        poke_interval=30,  # Check every 30 sec
         timeout=7200,       # Timeout after 2 hours
         mode="poke",
         queue='card_processing_queue'
