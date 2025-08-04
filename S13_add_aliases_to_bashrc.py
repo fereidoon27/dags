@@ -103,9 +103,7 @@ ALIASES_TO_ADD = [
     "alias sk='sudo systemctl status keepalived.service'",
     "alias stk='sudo systemctl start keepalived.service'",
     "alias spk='sudo systemctl stop keepalived.service'",
-    "alias rk='sudo systemctl restart keepalived.service'",
-    "# --- other alias --- ", 
-    "alias cc='clear'"
+    "alias rk='sudo systemctl restart keepalived.service'"
 ]
 # =============================================================================
 # UTILITY FUNCTIONS
