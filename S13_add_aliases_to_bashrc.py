@@ -31,6 +31,8 @@ TARGET_VMS = [
     {'ip': '192.168.83.148', 'hostname': 'sql1'},
     {'ip': '192.168.83.147', 'hostname': 'sql2'},
     {'ip': '192.168.83.149', 'hostname': 'sql3'},
+    {'ip': '192.168.83.151', 'hostname': 'scheduler2'},
+    {'ip': '192.168.83.154', 'hostname': 'haproxy2'},
 ]
 
 # Aliases to add (each line will be added to .bashrc)
@@ -87,9 +89,22 @@ ALIASES_TO_ADD = [
     "# --- ETCD Aliases ---",
     "alias jet='sudo journalctl -u etcd.service -f'",
     "alias set='sudo systemctl status etcd.service'",
-    "alias stet='sudo systemctl start etcd.service'"
+    "alias stet='sudo systemctl start etcd.service'",
+    "",
+    "# --- NFS Aliases ---",
+    "alias jnf='sudo journalctl -u nfs-server.service -f'",
+    "alias snf='sudo systemctl status nfs-server.service'",
+    "alias stnf='sudo systemctl start nfs-server.service'",
+    "alias spnf='sudo systemctl stop nfs-server.service'",
+    "alias rnf='sudo systemctl restart nfs-server.service'",
+    "",
+    "# --- Keepalived Aliases ---",
+    "alias jk='sudo journalctl -u keepalived.service -f'",
+    "alias sk='sudo systemctl status keepalived.service'",
+    "alias stk='sudo systemctl start keepalived.service'",
+    "alias spk='sudo systemctl stop keepalived.service'",
+    "alias rk='sudo systemctl restart keepalived.service'"
 ]
-
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
