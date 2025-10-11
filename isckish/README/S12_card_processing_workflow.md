@@ -341,15 +341,7 @@ If workers lose RabbitMQ/PostgreSQL connections, deploy the health check DAG:
 # Keeps workers active every 15 minutes
 ```
 
----
 
-## 🔒 Security Best Practices
-
-- ✅ **SSH Keys Only** - No password authentication
-- ✅ **Key File Permissions** - `chmod 600` on private keys
-- ✅ **No Secrets in Code** - Use Airflow Connections or environment variables
-- ✅ **Audit Trail** - Source files retained for compliance
-- ✅ **Network Isolation** - Use VPN or private network between servers
 
 ---
 
@@ -369,56 +361,25 @@ If workers lose RabbitMQ/PostgreSQL connections, deploy the health check DAG:
 
 ---
 
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/improvement`)
-3. Commit changes (`git commit -am 'Add new feature'`)
-4. Push to branch (`git push origin feature/improvement`)
-5. Open a Pull Request
-
----
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the ISC COrporation License - 
 
 ---
 
 ## 👥 Authors
 
-- **Initial Development** - [Your Name/Organization]
+- **Initial Development** - Mohammadamin Fereidoon
 
----
-
-## 🙏 Acknowledgments
-
-- Apache Airflow community for TaskFlow API
-- Paramiko project for SSH implementation
-- PostgreSQL and RabbitMQ teams for HA capabilities
 
 ---
 
 ## 📞 Support
 
 For issues and questions:
-- **Issues**: [GitHub Issues](https://github.com/yourorg/repo/issues)
-- **Documentation**: [Airflow Docs](https://airflow.apache.org/docs/)
-- **Email**: support@yourorganization.com
+
+- **Email**: fereidoon.info@gmail.com
+
 
 ---
-
-## 🗺️ Roadmap
-
-- [ ] Add support for SFTP protocol
-- [ ] Implement file compression before transfer
-- [ ] Add email notifications on completion/failure
-- [ ] Support for multiple source directories
-- [ ] Integration with data quality checks
-- [ ] Metrics export to Prometheus/Grafana
-
----
-
-**⭐ If you find this project useful, please consider giving it a star!**
