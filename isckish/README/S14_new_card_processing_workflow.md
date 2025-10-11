@@ -98,7 +98,7 @@ pip install paramiko>=2.8.0
 
 ```bash
 # Copy to Airflow DAGs folder (NFS-mounted in HA setup)
-cp S12_card_processing_workflow.py /home/rocky/airflow/dags/
+cp S14_new_card_processing_workflow.py /home/rocky/airflow/dags/
 
 # Verify no import errors
 airflow dags list-import-errors
@@ -169,7 +169,7 @@ SSH_CONFIG = {
 }
 
 # DAG Configuration
-dag_id = 'S12_card_processing_workflow'
+dag_id = 'S14_new_card_processing_workflow'
 schedule_interval = None  # Manual trigger or use cron
 queue = 'card_processing_queue'
 ```
@@ -205,12 +205,12 @@ Card batch files must follow this pattern:
 
 **Method 1: Airflow UI**
 1. Navigate to `http://10.101.20.210:8081`
-2. Find `S12_card_processing_workflow`
+2. Find `S14_new_card_processing_workflow`
 3. Click **▶ Trigger DAG**
 
 **Method 2: CLI**
 ```bash
-airflow dags trigger S12_card_processing_workflow
+airflow dags trigger S14_new_card_processing_workflow
 ```
 
 **Method 3: Schedule**
@@ -223,10 +223,10 @@ schedule_interval = '0 2 * * *'
 
 ```bash
 # View DAG runs
-airflow dags list-runs -d S12_card_processing_workflow
+airflow dags list-runs -d S14_new_card_processing_workflow
 
 # Check task logs
-airflow tasks logs S12_card_processing_workflow detect_card_files <run_id>
+airflow tasks logs S14_new_card_processing_workflow detect_card_files <run_id>
 ```
 
 ---
@@ -300,7 +300,7 @@ Status:         SUCCESS
 airflow dags list-import-errors
 
 # Test DAG file directly
-python3 /home/rocky/airflow/dags/S12_card_processing_workflow.py
+python3 /home/rocky/airflow/dags/S14_new_card_processing_workflow.py
 ```
 
 ### SSH Connection Issues
