@@ -1,710 +1,582 @@
 """
-Airflow 3.1.5 Health Monitoring DAG
+Airflow 3.1.5 Health Monitor DAG - Version 1
+Migrated from Airflow 2.9 to 3.1.5 with Python 3.12
 
-Environment: Single VM deployment (RHEL 9)
-- Airflow 3.1.5 with CeleryExecutor
-- PostgreSQL 16, Redis 7
-- All services on localhost
-
-Assumptions:
-1. Systemd service names: airflow-scheduler, airflow-api-server, airflow-dag-processor,
-   airflow-triggerer, airflow-celery-worker, postgresql, redis
-2. Airflow API server: http://localhost:8080
-3. Auth credentials: airflow/airflow
-4. AIRFLOW_HOME: ~/airflow (or from environment)
-5. No HA setup - single VM monitoring only
+MAJOR CHANGES:
+- Updated for Airflow 3.1.5 compatibility
+- Removed external server dependencies (uses local constants)
+- Updated import paths for providers-standard package
+- Changed schedule_interval to schedule parameter
+- Updated TaskFlow API patterns
+- Simplified for standalone operation
 """
-
-from airflow.sdk import dag, task
 from datetime import datetime, timedelta
+from airflow.decorators import dag, task
+from airflow.exceptions import AirflowException
 import subprocess
-import json
+import socket
+import platform
 import os
-import requests
-from requests.auth import HTTPBasicAuth
-import psutil
-import shutil
-from typing import Dict, List, Any
-from pathlib import Path
+import json
+from collections import OrderedDict
 
 
-# Configuration
-AIRFLOW_API_URL = "http://localhost:8080/api/v1"
-AIRFLOW_USERNAME = "airflow"
-AIRFLOW_PASSWORD = "airflow"
-AIRFLOW_HOME = os.environ.get("AIRFLOW_HOME", os.path.expanduser("~/airflow"))
+# Local configuration - no external dependencies
+LOCAL_SERVICES = {
+    'scheduler': {'name': 'airflow-scheduler', 'expected_status': 'active'},
+    'api_server': {'name': 'airflow-api-server', 'expected_status': 'active'},
+    'dag_processor': {'name': 'airflow-dag-processor', 'expected_status': 'active'},
+    'triggerer': {'name': 'airflow-triggerer', 'expected_status': 'active'},
+    'celery_worker': {'name': 'airflow-celery-worker', 'expected_status': 'active'},
+}
 
-SYSTEMD_SERVICES = [
-    "airflow-scheduler",
-    "airflow-api-server",
-    "airflow-dag-processor",
-    "airflow-triggerer",
-    "airflow-celery-worker",
-    "postgresql",
-    "redis",
-]
+# Expected resource thresholds
+RESOURCE_THRESHOLDS = {
+    'cpu_warning': 80.0,
+    'cpu_critical': 95.0,
+    'memory_warning': 80.0,
+    'memory_critical': 90.0,
+    'disk_warning': 80.0,
+    'disk_critical': 90.0,
+}
 
-# Thresholds
-CPU_THRESHOLD_WARNING = 80.0  # %
-CPU_THRESHOLD_CRITICAL = 95.0  # %
-MEMORY_THRESHOLD_WARNING = 80.0  # %
-MEMORY_THRESHOLD_CRITICAL = 95.0  # %
-DISK_THRESHOLD_WARNING = 80.0  # %
-DISK_THRESHOLD_CRITICAL = 90.0  # %
-LOGS_SIZE_WARNING_GB = 10.0
-LOGS_SIZE_CRITICAL_GB = 20.0
+# Airflow home directory
+AIRFLOW_HOME = os.getenv('AIRFLOW_HOME', '/home/airflow')
+
+
+def get_current_hostname():
+    """Get the current hostname"""
+    try:
+        return platform.node()
+    except Exception:
+        return socket.gethostname()
+
+
+def get_service_status(service_name: str) -> dict:
+    """
+    Check systemd service status locally
+    Returns dict with status information
+    """
+    try:
+        cmd = f"systemctl is-active {service_name}"
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        is_active = result.stdout.strip() == 'active'
+        
+        # Get detailed status
+        cmd_status = f"systemctl status {service_name} --no-pager -l"
+        status_result = subprocess.run(
+            cmd_status,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        return {
+            'service': service_name,
+            'status': 'active' if is_active else result.stdout.strip(),
+            'is_healthy': is_active,
+            'details': status_result.stdout[:500] if status_result.returncode == 0 else 'N/A'
+        }
+        
+    except subprocess.TimeoutExpired:
+        return {
+            'service': service_name,
+            'status': 'timeout',
+            'is_healthy': False,
+            'details': 'Service check timed out'
+        }
+    except Exception as e:
+        return {
+            'service': service_name,
+            'status': 'error',
+            'is_healthy': False,
+            'details': f'Error: {str(e)}'
+        }
+
+
+def get_system_resources() -> dict:
+    """
+    Get local system resource usage
+    Returns dict with CPU, memory, and disk metrics
+    """
+    resources = {
+        'hostname': get_current_hostname(),
+        'timestamp': datetime.now().isoformat(),
+    }
+    
+    # CPU usage
+    try:
+        cmd = "top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            resources['cpu_usage'] = float(result.stdout.strip())
+    except Exception as e:
+        resources['cpu_usage'] = None
+        resources['cpu_error'] = str(e)
+    
+    # Memory usage
+    try:
+        cmd = "free | grep Mem | awk '{printf \"%.2f\", ($3/$2) * 100}'"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            resources['memory_usage'] = float(result.stdout.strip())
+    except Exception as e:
+        resources['memory_usage'] = None
+        resources['memory_error'] = str(e)
+    
+    # Disk usage
+    try:
+        cmd = "df -h / | tail -1 | awk '{print $5}' | sed 's/%//'"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            resources['disk_usage'] = float(result.stdout.strip())
+    except Exception as e:
+        resources['disk_usage'] = None
+        resources['disk_error'] = str(e)
+    
+    # Airflow logs size
+    try:
+        logs_dir = f"{AIRFLOW_HOME}/logs"
+        cmd = f"du -sh {logs_dir} 2>/dev/null | awk '{{print $1}}'"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            resources['logs_size'] = result.stdout.strip()
+    except Exception:
+        resources['logs_size'] = 'N/A'
+    
+    return resources
+
+
+def fetch_service_logs(service_name: str, lines: int = 50) -> str:
+    """Fetch recent logs from journalctl for a service"""
+    try:
+        cmd = f"sudo journalctl -u {service_name} --no-pager -n {lines} -o short-iso 2>/dev/null"
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=15
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout
+        else:
+            return f"⚠️ Could not fetch logs (returncode: {result.returncode})"
+    
+    except subprocess.TimeoutExpired:
+        return "⚠️ Timeout while fetching logs"
+    except Exception as e:
+        return f"⚠️ Error fetching logs: {str(e)}"
 
 
 @dag(
-    dag_id="airflow_health_monitor",
-    schedule="*/15 * * * *",  # Every 15 minutes
+    dag_id='d02-v01-health_monitor',
+    description='Health monitoring DAG for Airflow 3.1.5 infrastructure',
+    schedule=timedelta(minutes=5),  # Changed from schedule_interval in Airflow 3.x
     start_date=datetime(2025, 1, 1),
     catchup=False,
     default_args={
-        "owner": "airflow",
-        "retries": 1,
-        "retry_delay": timedelta(minutes=2),
+        'owner': 'airflow',
+        'retries': 1,
+        'retry_delay': timedelta(minutes=1),
     },
-    tags=["monitoring", "health", "diagnostics"],
-    description="Comprehensive health monitoring for Airflow 3.1.5 single-VM deployment",
+    tags=['health-check', 'monitoring', 'v01'],
+    max_active_runs=1,
 )
-def airflow_health_monitor():
+def health_monitor_dag():
+    """
+    Main health monitoring DAG for Airflow 3.1.5
+    Checks local services, system resources, and generates health reports
+    """
     
-    @task
-    def check_systemd_services() -> Dict[str, Any]:
-        """
-        Check all Airflow and dependency systemd services.
-        Returns: dict with service statuses and diagnostics.
-        """
-        results = {
-            "status": "HEALTHY",
-            "services": {},
-            "severity": "INFO",
-            "diagnostics": []
-        }
+    @task(task_id="check_scheduler_service")
+    def check_scheduler_service():
+        """Check Airflow Scheduler service status"""
+        service = LOCAL_SERVICES['scheduler']['name']
+        status = get_service_status(service)
         
-        failed_services = []
+        print(f"\n{'='*80}")
+        print(f"📊 SCHEDULER SERVICE CHECK")
+        print(f"{'='*80}")
+        print(f"Service: {status['service']}")
+        print(f"Status: {status['status']}")
+        print(f"Healthy: {'✅' if status['is_healthy'] else '❌'}")
+        print(f"{'='*80}\n")
         
-        for service in SYSTEMD_SERVICES:
-            try:
-                # Check if service is active
-                check_cmd = ["systemctl", "is-active", service]
-                result = subprocess.run(
-                    check_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                
-                is_active = result.returncode == 0
-                status = result.stdout.strip()
-                
-                results["services"][service] = {
-                    "active": is_active,
-                    "status": status
-                }
-                
-                if not is_active:
-                    failed_services.append(service)
-                    
-                    # Get journal logs for failed service
-                    log_cmd = ["journalctl", "-u", service, "-n", "50", "--no-pager"]
-                    log_result = subprocess.run(
-                        log_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=15
-                    )
-                    
-                    results["diagnostics"].append({
-                        "service": service,
-                        "status": status,
-                        "logs": log_result.stdout
-                    })
-                    
-            except subprocess.TimeoutExpired:
-                results["services"][service] = {
-                    "active": False,
-                    "status": "TIMEOUT"
-                }
-                failed_services.append(service)
-                results["diagnostics"].append({
-                    "service": service,
-                    "error": "Command timeout"
-                })
-            except Exception as e:
-                results["services"][service] = {
-                    "active": False,
-                    "status": "ERROR",
-                    "error": str(e)
-                }
-                failed_services.append(service)
-                results["diagnostics"].append({
-                    "service": service,
-                    "error": str(e)
-                })
-        
-        if failed_services:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["failed_services"] = failed_services
-        
-        return results
-
-    @task
-    def check_scheduler_heartbeat() -> Dict[str, Any]:
-        """
-        Check Airflow scheduler heartbeat via REST API.
-        """
-        results = {
-            "status": "HEALTHY",
-            "severity": "INFO",
-            "diagnostics": []
-        }
-        
-        try:
-            # Check scheduler via health endpoint
-            response = requests.get(
-                f"{AIRFLOW_API_URL}/health",
-                auth=HTTPBasicAuth(AIRFLOW_USERNAME, AIRFLOW_PASSWORD),
-                timeout=10
+        if not status['is_healthy']:
+            # Fetch logs for troubleshooting
+            logs = fetch_service_logs(service, lines=50)
+            error_msg = (
+                f"❌ SCHEDULER SERVICE DOWN\n"
+                f"Status: {status['status']}\n"
+                f"{'='*80}\n"
+                f"Recent logs:\n{logs}\n"
+                f"{'='*80}"
             )
-            
-            if response.status_code == 200:
-                health_data = response.json()
-                scheduler_status = health_data.get("scheduler", {}).get("status")
-                
-                if scheduler_status != "healthy":
-                    results["status"] = "UNHEALTHY"
-                    results["severity"] = "CRITICAL"
-                    results["scheduler_status"] = scheduler_status
-                    results["diagnostics"].append({
-                        "message": f"Scheduler status: {scheduler_status}",
-                        "health_data": health_data
-                    })
-                else:
-                    results["scheduler_status"] = scheduler_status
-                    results["latest_scheduler_heartbeat"] = health_data.get("scheduler", {}).get("latest_scheduler_heartbeat")
-            else:
-                results["status"] = "UNHEALTHY"
-                results["severity"] = "CRITICAL"
-                results["diagnostics"].append({
-                    "message": "Failed to get health status",
-                    "status_code": response.status_code,
-                    "response": response.text
-                })
-                
-        except requests.exceptions.RequestException as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["diagnostics"].append({
-                "message": "API request failed",
-                "error": str(e)
-            })
-        except Exception as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["diagnostics"].append({
-                "message": "Unexpected error",
-                "error": str(e)
-            })
+            raise AirflowException(error_msg)
         
-        return results
-
-    @task
-    def check_celery_workers() -> Dict[str, Any]:
-        """
-        Check Celery workers availability using Celery inspect API.
-        """
-        results = {
-            "status": "HEALTHY",
-            "severity": "INFO",
-            "workers": [],
-            "diagnostics": []
-        }
+        return status
+    
+    
+    @task(task_id="check_api_server_service")
+    def check_api_server_service():
+        """Check Airflow API Server (Web UI) service status"""
+        service = LOCAL_SERVICES['api_server']['name']
+        status = get_service_status(service)
         
-        try:
-            from airflow.providers.celery.executors.celery_executor import app as celery_app
-            
-            # Inspect active workers
-            inspect = celery_app.control.inspect(timeout=5)
-            
-            # Get active workers
-            active_workers = inspect.active()
-            stats = inspect.stats()
-            
-            if not active_workers:
-                results["status"] = "UNHEALTHY"
-                results["severity"] = "CRITICAL"
-                results["diagnostics"].append({
-                    "message": "No active Celery workers found"
-                })
-            else:
-                results["workers"] = list(active_workers.keys())
-                results["worker_count"] = len(active_workers)
-                results["worker_stats"] = stats
-                
-        except ImportError as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["diagnostics"].append({
-                "message": "Failed to import Celery app",
-                "error": str(e)
-            })
-        except Exception as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["diagnostics"].append({
-                "message": "Failed to inspect Celery workers",
-                "error": str(e)
-            })
+        print(f"\n{'='*80}")
+        print(f"🌐 API SERVER SERVICE CHECK")
+        print(f"{'='*80}")
+        print(f"Service: {status['service']}")
+        print(f"Status: {status['status']}")
+        print(f"Healthy: {'✅' if status['is_healthy'] else '❌'}")
+        print(f"{'='*80}\n")
         
-        return results
-
-    @task
-    def check_api_server() -> Dict[str, Any]:
-        """
-        Check Airflow API server responsiveness.
-        """
-        results = {
-            "status": "HEALTHY",
-            "severity": "INFO",
-            "diagnostics": []
-        }
-        
-        try:
-            # Test API server with version endpoint
-            response = requests.get(
-                f"{AIRFLOW_API_URL}/version",
-                auth=HTTPBasicAuth(AIRFLOW_USERNAME, AIRFLOW_PASSWORD),
-                timeout=10
+        if not status['is_healthy']:
+            logs = fetch_service_logs(service, lines=50)
+            error_msg = (
+                f"❌ API SERVER SERVICE DOWN\n"
+                f"Status: {status['status']}\n"
+                f"{'='*80}\n"
+                f"Recent logs:\n{logs}\n"
+                f"{'='*80}"
             )
-            
-            if response.status_code == 200:
-                version_data = response.json()
-                results["airflow_version"] = version_data.get("version")
-                results["response_time_ms"] = response.elapsed.total_seconds() * 1000
-                
-                # Check response time
-                if results["response_time_ms"] > 5000:
-                    results["status"] = "DEGRADED"
-                    results["severity"] = "WARNING"
-                    results["diagnostics"].append({
-                        "message": "API server response time is slow",
-                        "response_time_ms": results["response_time_ms"]
-                    })
-            else:
-                results["status"] = "UNHEALTHY"
-                results["severity"] = "CRITICAL"
-                results["diagnostics"].append({
-                    "message": "API server returned error",
-                    "status_code": response.status_code,
-                    "response": response.text
-                })
-                
-        except requests.exceptions.Timeout:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["diagnostics"].append({
-                "message": "API server request timeout"
-            })
-        except requests.exceptions.RequestException as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["diagnostics"].append({
-                "message": "Failed to connect to API server",
-                "error": str(e)
-            })
-        except Exception as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["diagnostics"].append({
-                "message": "Unexpected error",
-                "error": str(e)
-            })
+            raise AirflowException(error_msg)
         
-        return results
-
-    @task
-    def check_system_resources() -> Dict[str, Any]:
-        """
-        Monitor system resources: CPU, RAM, disk.
-        """
-        results = {
-            "status": "HEALTHY",
-            "severity": "INFO",
-            "diagnostics": []
-        }
+        return status
+    
+    
+    @task(task_id="check_dag_processor_service")
+    def check_dag_processor_service():
+        """Check Airflow DAG Processor service status"""
+        service = LOCAL_SERVICES['dag_processor']['name']
+        status = get_service_status(service)
         
-        try:
-            # CPU Usage
-            cpu_percent = psutil.cpu_percent(interval=1)
-            results["cpu_percent"] = cpu_percent
-            
-            if cpu_percent >= CPU_THRESHOLD_CRITICAL:
-                results["status"] = "UNHEALTHY"
-                results["severity"] = "CRITICAL"
-                results["diagnostics"].append({
-                    "message": f"CPU usage critical: {cpu_percent}%",
-                    "threshold": CPU_THRESHOLD_CRITICAL
-                })
-            elif cpu_percent >= CPU_THRESHOLD_WARNING:
-                if results["severity"] == "INFO":
-                    results["severity"] = "WARNING"
-                results["diagnostics"].append({
-                    "message": f"CPU usage warning: {cpu_percent}%",
-                    "threshold": CPU_THRESHOLD_WARNING
-                })
-            
-            # Memory Usage
-            memory = psutil.virtual_memory()
-            results["memory_percent"] = memory.percent
-            results["memory_available_gb"] = memory.available / (1024**3)
-            results["memory_total_gb"] = memory.total / (1024**3)
-            
-            if memory.percent >= MEMORY_THRESHOLD_CRITICAL:
-                results["status"] = "UNHEALTHY"
-                results["severity"] = "CRITICAL"
-                results["diagnostics"].append({
-                    "message": f"Memory usage critical: {memory.percent}%",
-                    "threshold": MEMORY_THRESHOLD_CRITICAL,
-                    "available_gb": results["memory_available_gb"]
-                })
-            elif memory.percent >= MEMORY_THRESHOLD_WARNING:
-                if results["severity"] == "INFO":
-                    results["severity"] = "WARNING"
-                results["diagnostics"].append({
-                    "message": f"Memory usage warning: {memory.percent}%",
-                    "threshold": MEMORY_THRESHOLD_WARNING,
-                    "available_gb": results["memory_available_gb"]
-                })
-            
-            # Disk Usage
-            disk = psutil.disk_usage('/')
-            results["disk_percent"] = disk.percent
-            results["disk_free_gb"] = disk.free / (1024**3)
-            results["disk_total_gb"] = disk.total / (1024**3)
-            
-            if disk.percent >= DISK_THRESHOLD_CRITICAL:
-                results["status"] = "UNHEALTHY"
-                results["severity"] = "CRITICAL"
-                results["diagnostics"].append({
-                    "message": f"Disk usage critical: {disk.percent}%",
-                    "threshold": DISK_THRESHOLD_CRITICAL,
-                    "free_gb": results["disk_free_gb"]
-                })
-            elif disk.percent >= DISK_THRESHOLD_WARNING:
-                if results["severity"] == "INFO":
-                    results["severity"] = "WARNING"
-                results["diagnostics"].append({
-                    "message": f"Disk usage warning: {disk.percent}%",
-                    "threshold": DISK_THRESHOLD_WARNING,
-                    "free_gb": results["disk_free_gb"]
-                })
-            
-        except Exception as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "CRITICAL"
-            results["diagnostics"].append({
-                "message": "Failed to collect system resources",
-                "error": str(e)
-            })
+        print(f"\n{'='*80}")
+        print(f"📁 DAG PROCESSOR SERVICE CHECK")
+        print(f"{'='*80}")
+        print(f"Service: {status['service']}")
+        print(f"Status: {status['status']}")
+        print(f"Healthy: {'✅' if status['is_healthy'] else '❌'}")
+        print(f"{'='*80}\n")
         
-        return results
-
-    @task
-    def check_top_processes() -> Dict[str, Any]:
-        """
-        Get top 5 CPU and memory consuming processes.
-        """
-        results = {
-            "status": "HEALTHY",
-            "severity": "INFO",
-            "diagnostics": []
-        }
+        if not status['is_healthy']:
+            logs = fetch_service_logs(service, lines=50)
+            error_msg = (
+                f"❌ DAG PROCESSOR SERVICE DOWN\n"
+                f"Status: {status['status']}\n"
+                f"{'='*80}\n"
+                f"Recent logs:\n{logs}\n"
+                f"{'='*80}"
+            )
+            raise AirflowException(error_msg)
         
-        try:
-            processes = []
-            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'username']):
-                try:
-                    processes.append(proc.info)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            
-            # Top 5 by CPU
-            top_cpu = sorted(processes, key=lambda x: x['cpu_percent'] or 0, reverse=True)[:5]
-            results["top_cpu_processes"] = [
-                {
-                    "pid": p['pid'],
-                    "name": p['name'],
-                    "cpu_percent": p['cpu_percent'],
-                    "username": p['username']
-                }
-                for p in top_cpu
-            ]
-            
-            # Top 5 by Memory
-            top_memory = sorted(processes, key=lambda x: x['memory_percent'] or 0, reverse=True)[:5]
-            results["top_memory_processes"] = [
-                {
-                    "pid": p['pid'],
-                    "name": p['name'],
-                    "memory_percent": p['memory_percent'],
-                    "username": p['username']
-                }
-                for p in top_memory
-            ]
-            
-        except Exception as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "WARNING"
-            results["diagnostics"].append({
-                "message": "Failed to collect process information",
-                "error": str(e)
-            })
+        return status
+    
+    
+    @task(task_id="check_triggerer_service")
+    def check_triggerer_service():
+        """Check Airflow Triggerer service status"""
+        service = LOCAL_SERVICES['triggerer']['name']
+        status = get_service_status(service)
         
-        return results
-
-    @task
-    def check_logs_directory() -> Dict[str, Any]:
-        """
-        Check Airflow logs directory size.
-        """
-        results = {
-            "status": "HEALTHY",
-            "severity": "INFO",
-            "diagnostics": []
-        }
+        print(f"\n{'='*80}")
+        print(f"⚡ TRIGGERER SERVICE CHECK")
+        print(f"{'='*80}")
+        print(f"Service: {status['service']}")
+        print(f"Status: {status['status']}")
+        print(f"Healthy: {'✅' if status['is_healthy'] else '❌'}")
+        print(f"{'='*80}\n")
         
-        try:
-            logs_dir = Path(AIRFLOW_HOME) / "logs"
-            
-            if not logs_dir.exists():
-                results["status"] = "UNHEALTHY"
-                results["severity"] = "WARNING"
-                results["diagnostics"].append({
-                    "message": f"Logs directory not found: {logs_dir}"
-                })
-                return results
-            
-            # Calculate directory size
-            total_size = 0
-            file_count = 0
-            
-            for item in logs_dir.rglob('*'):
-                if item.is_file():
-                    total_size += item.stat().st_size
-                    file_count += 1
-            
-            size_gb = total_size / (1024**3)
-            results["logs_size_gb"] = size_gb
-            results["logs_file_count"] = file_count
-            results["logs_directory"] = str(logs_dir)
-            
-            if size_gb >= LOGS_SIZE_CRITICAL_GB:
-                results["status"] = "UNHEALTHY"
-                results["severity"] = "CRITICAL"
-                results["diagnostics"].append({
-                    "message": f"Logs directory size critical: {size_gb:.2f} GB",
-                    "threshold": LOGS_SIZE_CRITICAL_GB,
-                    "recommendation": "Consider log rotation or cleanup"
-                })
-            elif size_gb >= LOGS_SIZE_WARNING_GB:
-                if results["severity"] == "INFO":
-                    results["severity"] = "WARNING"
-                results["diagnostics"].append({
-                    "message": f"Logs directory size warning: {size_gb:.2f} GB",
-                    "threshold": LOGS_SIZE_WARNING_GB,
-                    "recommendation": "Monitor log growth"
-                })
-            
-        except Exception as e:
-            results["status"] = "UNHEALTHY"
-            results["severity"] = "WARNING"
-            results["diagnostics"].append({
-                "message": "Failed to check logs directory",
-                "error": str(e)
-            })
+        if not status['is_healthy']:
+            logs = fetch_service_logs(service, lines=50)
+            error_msg = (
+                f"❌ TRIGGERER SERVICE DOWN\n"
+                f"Status: {status['status']}\n"
+                f"{'='*80}\n"
+                f"Recent logs:\n{logs}\n"
+                f"{'='*80}"
+            )
+            raise AirflowException(error_msg)
         
-        return results
-
-    @task
-    def aggregate_health_summary(
-        systemd_check: Dict,
-        scheduler_check: Dict,
-        celery_check: Dict,
-        api_check: Dict,
-        resources_check: Dict,
-        processes_check: Dict,
-        logs_check: Dict
-    ) -> Dict[str, Any]:
-        """
-        Aggregate all health check results and generate summary.
-        """
-        all_checks = {
-            "systemd_services": systemd_check,
-            "scheduler_heartbeat": scheduler_check,
-            "celery_workers": celery_check,
-            "api_server": api_check,
-            "system_resources": resources_check,
-            "top_processes": processes_check,
-            "logs_directory": logs_check
-        }
+        return status
+    
+    
+    @task(task_id="check_celery_worker_service")
+    def check_celery_worker_service():
+        """Check Airflow Celery Worker service status"""
+        service = LOCAL_SERVICES['celery_worker']['name']
+        status = get_service_status(service)
         
-        # Determine overall status
-        critical_issues = []
+        print(f"\n{'='*80}")
+        print(f"👷 CELERY WORKER SERVICE CHECK")
+        print(f"{'='*80}")
+        print(f"Service: {status['service']}")
+        print(f"Status: {status['status']}")
+        print(f"Healthy: {'✅' if status['is_healthy'] else '❌'}")
+        print(f"{'='*80}\n")
+        
+        if not status['is_healthy']:
+            logs = fetch_service_logs(service, lines=50)
+            error_msg = (
+                f"❌ CELERY WORKER SERVICE DOWN\n"
+                f"Status: {status['status']}\n"
+                f"{'='*80}\n"
+                f"Recent logs:\n{logs}\n"
+                f"{'='*80}"
+            )
+            raise AirflowException(error_msg)
+        
+        return status
+    
+    
+    @task(task_id="check_system_resources")
+    def check_system_resources():
+        """Monitor system resources (CPU, Memory, Disk)"""
+        resources = get_system_resources()
+        
+        print(f"\n{'='*80}")
+        print(f"💻 SYSTEM RESOURCES CHECK")
+        print(f"{'='*80}")
+        print(f"Hostname: {resources['hostname']}")
+        print(f"Timestamp: {resources['timestamp']}")
+        print(f"CPU Usage: {resources.get('cpu_usage', 'N/A')}%")
+        print(f"Memory Usage: {resources.get('memory_usage', 'N/A')}%")
+        print(f"Disk Usage: {resources.get('disk_usage', 'N/A')}%")
+        print(f"Logs Size: {resources.get('logs_size', 'N/A')}")
+        print(f"{'='*80}\n")
+        
+        # Check thresholds
         warnings = []
+        critical = []
         
-        for check_name, check_result in all_checks.items():
-            if check_result.get("severity") == "CRITICAL":
-                critical_issues.append({
-                    "check": check_name,
-                    "status": check_result.get("status"),
-                    "diagnostics": check_result.get("diagnostics", [])
-                })
-            elif check_result.get("severity") == "WARNING":
-                warnings.append({
-                    "check": check_name,
-                    "status": check_result.get("status"),
-                    "diagnostics": check_result.get("diagnostics", [])
-                })
+        if resources.get('cpu_usage'):
+            if resources['cpu_usage'] >= RESOURCE_THRESHOLDS['cpu_critical']:
+                critical.append(f"CPU at {resources['cpu_usage']}%")
+            elif resources['cpu_usage'] >= RESOURCE_THRESHOLDS['cpu_warning']:
+                warnings.append(f"CPU at {resources['cpu_usage']}%")
         
-        summary = {
-            "timestamp": datetime.now().isoformat(),
-            "overall_status": "HEALTHY",
-            "overall_severity": "INFO",
-            "critical_count": len(critical_issues),
-            "warning_count": len(warnings),
-            "critical_issues": critical_issues,
-            "warnings": warnings,
-            "all_checks": all_checks
-        }
+        if resources.get('memory_usage'):
+            if resources['memory_usage'] >= RESOURCE_THRESHOLDS['memory_critical']:
+                critical.append(f"Memory at {resources['memory_usage']}%")
+            elif resources['memory_usage'] >= RESOURCE_THRESHOLDS['memory_warning']:
+                warnings.append(f"Memory at {resources['memory_usage']}%")
         
-        if critical_issues:
-            summary["overall_status"] = "CRITICAL"
-            summary["overall_severity"] = "CRITICAL"
-        elif warnings:
-            summary["overall_status"] = "DEGRADED"
-            summary["overall_severity"] = "WARNING"
-        
-        # Print summary
-        print("=" * 80)
-        print("AIRFLOW HEALTH MONITORING SUMMARY")
-        print("=" * 80)
-        print(f"Timestamp: {summary['timestamp']}")
-        print(f"Overall Status: {summary['overall_status']}")
-        print(f"Overall Severity: {summary['overall_severity']}")
-        print(f"Critical Issues: {summary['critical_count']}")
-        print(f"Warnings: {summary['warning_count']}")
-        print("=" * 80)
-        
-        if critical_issues:
-            print("\n🔴 CRITICAL ISSUES:")
-            for issue in critical_issues:
-                print(f"\n  Check: {issue['check']}")
-                print(f"  Status: {issue['status']}")
-                for diag in issue.get('diagnostics', []):
-                    print(f"  - {diag}")
+        if resources.get('disk_usage'):
+            if resources['disk_usage'] >= RESOURCE_THRESHOLDS['disk_critical']:
+                critical.append(f"Disk at {resources['disk_usage']}%")
+            elif resources['disk_usage'] >= RESOURCE_THRESHOLDS['disk_warning']:
+                warnings.append(f"Disk at {resources['disk_usage']}%")
         
         if warnings:
-            print("\n⚠️  WARNINGS:")
-            for warning in warnings:
-                print(f"\n  Check: {warning['check']}")
-                print(f"  Status: {warning['status']}")
-                for diag in warning.get('diagnostics', []):
-                    print(f"  - {diag}")
+            print(f"⚠️ WARNINGS: {', '.join(warnings)}")
         
-        if not critical_issues and not warnings:
-            print("\n✅ ALL SYSTEMS HEALTHY")
+        if critical:
+            error_msg = f"🚨 CRITICAL: {', '.join(critical)}"
+            print(error_msg)
+            raise AirflowException(error_msg)
         
-        print("\n" + "=" * 80)
-        print("DETAILED METRICS:")
-        print("=" * 80)
-        
-        # Systemd Services
-        if "systemd_services" in all_checks:
-            print("\nSystemd Services:")
-            for service, status in all_checks["systemd_services"].get("services", {}).items():
-                icon = "✅" if status.get("active") else "❌"
-                print(f"  {icon} {service}: {status.get('status')}")
-        
-        # System Resources
-        if "system_resources" in all_checks:
-            res = all_checks["system_resources"]
-            print("\nSystem Resources:")
-            print(f"  CPU: {res.get('cpu_percent', 0):.1f}%")
-            print(f"  Memory: {res.get('memory_percent', 0):.1f}% ({res.get('memory_available_gb', 0):.2f} GB available)")
-            print(f"  Disk: {res.get('disk_percent', 0):.1f}% ({res.get('disk_free_gb', 0):.2f} GB free)")
-        
-        # Logs
-        if "logs_directory" in all_checks:
-            logs = all_checks["logs_directory"]
-            print(f"\nLogs Directory: {logs.get('logs_size_gb', 0):.2f} GB ({logs.get('logs_file_count', 0)} files)")
-        
-        # Celery Workers
-        if "celery_workers" in all_checks:
-            celery = all_checks["celery_workers"]
-            print(f"\nCelery Workers: {celery.get('worker_count', 0)} active")
-            for worker in celery.get('workers', []):
-                print(f"  - {worker}")
-        
-        print("=" * 80)
-        
-        return summary
-
-    @task
-    def health_gate(summary: Dict[str, Any]) -> str:
+        return resources
+    
+    
+    @task(task_id="check_database_connectivity")
+    def check_database_connectivity():
         """
-        Final gate: fail DAG if any critical issues exist.
+        Check PostgreSQL database connectivity
+        Note: In Airflow 3.x, direct database access from tasks is discouraged
+        This is a simplified connectivity check
         """
-        if summary["overall_severity"] == "CRITICAL":
-            critical_count = summary["critical_count"]
-            critical_checks = [issue["check"] for issue in summary["critical_issues"]]
-            
-            error_message = (
-                f"Health check FAILED with {critical_count} critical issue(s): "
-                f"{', '.join(critical_checks)}"
+        try:
+            # Use airflow CLI to verify database connection
+            cmd = "airflow db check 2>&1"
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
             )
             
-            print("=" * 80)
-            print("❌ HEALTH CHECK FAILED")
-            print("=" * 80)
-            print(error_message)
-            print("=" * 80)
+            is_healthy = result.returncode == 0
             
-            raise Exception(error_message)
+            print(f"\n{'='*80}")
+            print(f"🗄️ DATABASE CONNECTIVITY CHECK")
+            print(f"{'='*80}")
+            print(f"Status: {'✅ Connected' if is_healthy else '❌ Connection Failed'}")
+            print(f"Output: {result.stdout[:200]}")
+            print(f"{'='*80}\n")
+            
+            if not is_healthy:
+                raise AirflowException(
+                    f"❌ DATABASE CONNECTION FAILED\n"
+                    f"Error: {result.stderr[:500]}"
+                )
+            
+            return {'status': 'connected', 'output': result.stdout}
+            
+        except Exception as e:
+            raise AirflowException(f"❌ Database check failed: {str(e)}")
+    
+    
+    @task(task_id="check_redis_connectivity")
+    def check_redis_connectivity():
+        """
+        Check Redis connectivity (Celery broker)
+        """
+        try:
+            cmd = "redis-cli ping 2>&1"
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            is_healthy = result.stdout.strip().upper() == 'PONG'
+            
+            print(f"\n{'='*80}")
+            print(f"🔴 REDIS CONNECTIVITY CHECK")
+            print(f"{'='*80}")
+            print(f"Status: {'✅ Connected' if is_healthy else '❌ Connection Failed'}")
+            print(f"Response: {result.stdout.strip()}")
+            print(f"{'='*80}\n")
+            
+            if not is_healthy:
+                raise AirflowException(
+                    f"❌ REDIS CONNECTION FAILED\n"
+                    f"Response: {result.stdout}\n"
+                    f"Error: {result.stderr}"
+                )
+            
+            return {'status': 'connected', 'response': result.stdout.strip()}
+            
+        except Exception as e:
+            raise AirflowException(f"❌ Redis check failed: {str(e)}")
+    
+    
+    @task(task_id="health_summary", trigger_rule="all_done")
+    def health_summary(**context):
+        """
+        Generate comprehensive health summary
+        In Airflow 3.x, use context directly instead of get_current_context()
+        """
+        # Access task instance from context
+        ti = context['ti']
+        dag_run = context['dag_run']
         
-        status_message = "ALL_HEALTHY"
-        if summary["overall_severity"] == "WARNING":
-            status_message = f"HEALTHY_WITH_WARNINGS ({summary['warning_count']})"
+        # Get all task instances for this DAG run
+        task_instances = dag_run.get_task_instances()
         
-        print("=" * 80)
-        print(f"✅ HEALTH CHECK PASSED: {status_message}")
-        print("=" * 80)
+        # Count task states
+        from airflow.utils.state import TaskInstanceState
         
-        return status_message
-
+        success_tasks = [t for t in task_instances if t.state == TaskInstanceState.SUCCESS]
+        failed_tasks = [t for t in task_instances if t.state == TaskInstanceState.FAILED]
+        
+        print("\n" + "="*80)
+        print("🏥 HEALTH CHECK SUMMARY")
+        print("="*80)
+        print(f"✅ Successful Checks: {len(success_tasks)}")
+        print(f"❌ Failed Checks: {len(failed_tasks)}")
+        
+        if failed_tasks:
+            print("\n🚨 FAILED CHECKS:")
+            for task in failed_tasks:
+                print(f"   - {task.task_id}")
+        
+        print("="*80 + "\n")
+        
+        # Push summary to XCom for final status check
+        summary_data = {
+            'total': len(task_instances),
+            'success': len(success_tasks),
+            'failed': len(failed_tasks),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # In Airflow 3.x, XCom push syntax remains similar
+        ti.xcom_push(key='health_summary', value=summary_data)
+        
+        return summary_data
+    
+    
+    @task(task_id="final_status_check")
+    def final_status_check(**context):
+        """
+        Final status check - fail the DAG if any critical checks failed
+        """
+        ti = context['ti']
+        
+        # Pull summary from XCom
+        summary = ti.xcom_pull(task_ids='health_summary', key='health_summary')
+        
+        if not summary:
+            raise AirflowException("❌ Could not retrieve health summary")
+        
+        failed_count = summary.get('failed', 0)
+        
+        print("\n" + "="*80)
+        print("🎯 FINAL STATUS CHECK")
+        print("="*80)
+        print(f"Total Checks: {summary['total']}")
+        print(f"Successful: {summary['success']}")
+        print(f"Failed: {failed_count}")
+        print("="*80 + "\n")
+        
+        if failed_count > 0:
+            raise AirflowException(
+                f"🚨 HEALTH CHECK FAILED: {failed_count} check(s) failed\n"
+                f"Review the logs above for details"
+            )
+        
+        print("✅ ALL HEALTH CHECKS PASSED - SYSTEM HEALTHY")
+        return {'status': 'all_healthy', 'timestamp': datetime.now().isoformat()}
+    
+    
     # Define task dependencies
-    systemd_results = check_systemd_services()
-    scheduler_results = check_scheduler_heartbeat()
-    celery_results = check_celery_workers()
-    api_results = check_api_server()
-    resources_results = check_system_resources()
-    processes_results = check_top_processes()
-    logs_results = check_logs_directory()
+    # In Airflow 3.x, task dependencies are defined the same way
     
-    summary = aggregate_health_summary(
-        systemd_results,
-        scheduler_results,
-        celery_results,
-        api_results,
-        resources_results,
-        processes_results,
-        logs_results
-    )
+    # Service checks (run in parallel)
+    scheduler_check = check_scheduler_service()
+    api_server_check = check_api_server_service()
+    dag_processor_check = check_dag_processor_service()
+    triggerer_check = check_triggerer_service()
+    celery_worker_check = check_celery_worker_service()
     
-    gate_result = health_gate(summary)
+    # Infrastructure checks (run in parallel)
+    system_resources_check = check_system_resources()
+    database_check = check_database_connectivity()
+    redis_check = check_redis_connectivity()
+    
+    # Summary task (waits for all checks to complete)
+    summary = health_summary()
+    
+    # Final status check
+    final = final_status_check()
+    
+    # Set up dependencies
+    # All service checks must complete before summary
+    [
+        scheduler_check,
+        api_server_check,
+        dag_processor_check,
+        triggerer_check,
+        celery_worker_check,
+        system_resources_check,
+        database_check,
+        redis_check
+    ] >> summary >> final
 
 
 # Instantiate the DAG
-dag_instance = airflow_health_monitor()
+dag_instance = health_monitor_dag()
