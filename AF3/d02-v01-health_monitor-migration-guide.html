@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Airflow 2.9 → 3.1.5 Migration Guide</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-secondary: #151925;
+            --bg-card: #1a1f2e;
+            --accent-primary: #00d9ff;
+            --accent-secondary: #ff006e;
+            --accent-success: #00ff88;
+            --accent-warning: #ffd60a;
+            --text-primary: #e8eef2;
+            --text-secondary: #8a94a6;
+            --border: rgba(0, 217, 255, 0.2);
+            --glow: rgba(0, 217, 255, 0.4);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Work Sans', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .hero {
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+            padding: 4rem 2rem;
+            text-align: center;
+            border-bottom: 2px solid var(--border);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, var(--glow) 0%, transparent 70%);
+            animation: rotate 20s linear infinite;
+            pointer-events: none;
+            opacity: 0.3;
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        h1 {
+            font-family: 'Syne', sans-serif;
+            font-size: 3.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+            position: relative;
+            z-index: 1;
+            animation: fadeInUp 0.8s ease-out;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .subtitle {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            position: relative;
+            z-index: 1;
+            animation: fadeInUp 0.8s ease-out 0.2s backwards;
+        }
+
+        .version-badge {
+            display: inline-block;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            padding: 0.5rem 1.5rem;
+            border-radius: 50px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            margin: 0.5rem;
+            box-shadow: 0 0 20px var(--glow);
+            animation: fadeInUp 0.8s ease-out 0.4s backwards;
+        }
+
+        .old-version {
+            background: linear-gradient(135deg, rgba(255, 0, 110, 0.2), transparent);
+            border-color: var(--accent-secondary);
+        }
+
+        .new-version {
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), transparent);
+            border-color: var(--accent-success);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .section {
+            margin: 3rem 0;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        h2 {
+            font-family: 'Syne', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--accent-primary);
+            margin-bottom: 1.5rem;
+            position: relative;
+            padding-left: 1rem;
+        }
+
+        h2::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(180deg, var(--accent-primary), var(--accent-secondary));
+            border-radius: 2px;
+        }
+
+        h3 {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.75rem;
+            color: var(--accent-success);
+            margin: 2rem 0 1rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 1.5rem 0;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: var(--accent-primary);
+            box-shadow: 0 8px 32px rgba(0, 217, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+
+        @media (max-width: 768px) {
+            .comparison {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .before {
+            background: linear-gradient(135deg, rgba(255, 0, 110, 0.1), transparent);
+            border-left: 3px solid var(--accent-secondary);
+        }
+
+        .after {
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), transparent);
+            border-left: 3px solid var(--accent-success);
+        }
+
+        .code-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .code-label.old::before {
+            content: '❌';
+        }
+
+        .code-label.new::before {
+            content: '✅';
+        }
+
+        pre {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-secondary);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .highlight {
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        .important-box {
+            background: linear-gradient(135deg, rgba(255, 214, 10, 0.1), transparent);
+            border: 2px solid var(--accent-warning);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            position: relative;
+        }
+
+        .important-box::before {
+            content: '⚠️';
+            font-size: 2rem;
+            position: absolute;
+            top: -1rem;
+            left: 1.5rem;
+            background: var(--bg-card);
+            padding: 0 0.5rem;
+        }
+
+        .important-box h4 {
+            color: var(--accent-warning);
+            font-family: 'Syne', sans-serif;
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .concept-box {
+            background: linear-gradient(135deg, rgba(0, 217, 255, 0.05), transparent);
+            border: 1px solid var(--accent-primary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+        }
+
+        .concept-box h4 {
+            color: var(--accent-primary);
+            font-family: 'Syne', sans-serif;
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .concept-box h4::before {
+            content: '💡';
+        }
+
+        ul {
+            margin: 1rem 0 1rem 2rem;
+        }
+
+        li {
+            margin: 0.75rem 0;
+            color: var(--text-secondary);
+        }
+
+        li strong {
+            color: var(--text-primary);
+        }
+
+        .change-type {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .breaking {
+            background: rgba(255, 0, 110, 0.2);
+            color: var(--accent-secondary);
+            border: 1px solid var(--accent-secondary);
+        }
+
+        .new-feature {
+            background: rgba(0, 255, 136, 0.2);
+            color: var(--accent-success);
+            border: 1px solid var(--accent-success);
+        }
+
+        .improved {
+            background: rgba(0, 217, 255, 0.2);
+            color: var(--accent-primary);
+            border: 1px solid var(--accent-primary);
+        }
+
+        .deprecated {
+            background: rgba(255, 214, 10, 0.2);
+            color: var(--accent-warning);
+            border: 1px solid var(--accent-warning);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin: 2rem 0;
+            background: var(--bg-card);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        thead {
+            background: var(--bg-secondary);
+        }
+
+        th {
+            padding: 1rem;
+            text-align: left;
+            font-family: 'Syne', sans-serif;
+            color: var(--accent-primary);
+            font-weight: 700;
+            border-bottom: 2px solid var(--border);
+        }
+
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: rgba(0, 217, 255, 0.05);
+        }
+
+        .footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            margin-top: 4rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .scroll-indicator {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+            transition: width 0.2s ease;
+            z-index: 1000;
+            box-shadow: 0 0 10px var(--glow);
+        }
+    </style>
+</head>
+<body>
+    <div class="scroll-indicator" id="scrollIndicator"></div>
+
+    <div class="hero">
+        <h1>Airflow Migration Guide</h1>
+        <p class="subtitle">Comprehensive breakdown of changes from 2.9 to 3.1.5</p>
+        <div>
+            <span class="version-badge old-version">Airflow 2.9 + Python 3.9</span>
+            <span style="color: var(--accent-primary); font-size: 2rem;">→</span>
+            <span class="version-badge new-version">Airflow 3.1.5 + Python 3.12</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Core Concepts Section -->
+        <section class="section">
+            <h2>🎓 Understanding Airflow Core Concepts</h2>
+            
+            <div class="concept-box">
+                <h4>What is Airflow?</h4>
+                <p>Apache Airflow is a platform to programmatically author, schedule, and monitor workflows. Think of it as a sophisticated task scheduler that can handle complex dependencies between tasks.</p>
+            </div>
+
+            <div class="card">
+                <h3>Key Components in Airflow 3.1.5</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>What It Does</th>
+                            <th>Your Setup</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Scheduler</strong></td>
+                            <td>Triggers workflows and submits tasks to the executor</td>
+                            <td>✅ <code>airflow-scheduler</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>API Server</strong></td>
+                            <td>Serves the Web UI and REST API (combined in 3.x)</td>
+                            <td>✅ <code>airflow-api-server</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>DAG Processor</strong></td>
+                            <td>Parses DAG files separately from scheduler (new in 3.x)</td>
+                            <td>✅ <code>airflow-dag-processor</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Triggerer</strong></td>
+                            <td>Handles async/deferrable operators</td>
+                            <td>✅ <code>airflow-triggerer</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Celery Worker</strong></td>
+                            <td>Executes tasks when using CeleryExecutor</td>
+                            <td>✅ <code>airflow-celery-worker</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>PostgreSQL</strong></td>
+                            <td>Stores metadata (DAG runs, task states, connections)</td>
+                            <td>✅ Port 5432</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Redis</strong></td>
+                            <td>Message broker for Celery (task queue)</td>
+                            <td>✅ Port 6379</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="concept-box">
+                <h4>What is a DAG?</h4>
+                <p><strong>DAG</strong> stands for <span class="highlight">Directed Acyclic Graph</span>. It's a collection of tasks with dependencies between them. "Directed" means tasks flow in one direction, "Acyclic" means no circular dependencies.</p>
+                <pre>Task A → Task B → Task C
+         ↘ Task D ↗</pre>
+            </div>
+
+            <div class="concept-box">
+                <h4>What is TaskFlow API?</h4>
+                <p>TaskFlow API (the <code>@task</code> decorator) is a cleaner way to write DAGs in Python. Instead of manually creating operators, you just write Python functions and decorate them with <code>@task</code>.</p>
+            </div>
+        </section>
+
+        <!-- Breaking Changes Section -->
+        <section class="section">
+            <h2>💥 Breaking Changes from 2.9 to 3.1.5</h2>
+
+            <div class="card">
+                <span class="change-type breaking">Breaking Change</span>
+                <h3>1. Import Paths Changed</h3>
+                <p>Operators moved to a separate provider package.</p>
+                
+                <div class="comparison">
+                    <div class="before card">
+                        <div class="code-label old">Airflow 2.9</div>
+                        <pre>from airflow.operators.python import get_current_context</pre>
+                    </div>
+                    <div class="after card">
+                        <div class="code-label new">Airflow 3.1.5</div>
+                        <pre>from airflow.operators.python import get_current_context
+# Still works, but operators are now in:
+# apache-airflow-providers-standard</pre>
+                    </div>
+                </div>
+
+                <div class="important-box">
+                    <h4>Action Required</h4>
+                    <p>Install the standard providers package:</p>
+                    <pre>pip3 install --break-system-packages apache-airflow-providers-standard</pre>
+                </div>
+            </div>
+
+            <div class="card">
+                <span class="change-type breaking">Breaking Change</span>
+                <h3>2. DAG Scheduling Parameter</h3>
+                
+                <div class="comparison">
+                    <div class="before card">
+                        <div class="code-label old">Airflow 2.9</div>
+                        <pre>@dag(
+    dag_id='my_dag',
+    schedule_interval=timedelta(minutes=5),  # ❌ Old parameter
+    ...
+)</pre>
+                    </div>
+                    <div class="after card">
+                        <div class="code-label new">Airflow 3.1.5</div>
+                        <pre>@dag(
+    dag_id='my_dag',
+    schedule=timedelta(minutes=5),  # ✅ New parameter
+    ...
+)</pre>
+                    </div>
+                </div>
+
+                <p><strong>Why?</strong> The <code>schedule</code> parameter is more flexible and aligns with the new scheduling system.</p>
+            </div>
+
+            <div class="card">
+                <span class="change-type breaking">Breaking Change</span>
+                <h3>3. Context Access in Tasks</h3>
+                
+                <div class="comparison">
+                    <div class="before card">
+                        <div class="code-label old">Airflow 2.9</div>
+                        <pre>from airflow.operators.python import get_current_context
+
+@task
+def my_task():
+    context = get_current_context()
+    ti = context['ti']
+    ...</pre>
+                    </div>
+                    <div class="after card">
+                        <div class="code-label new">Airflow 3.1.5</div>
+                        <pre># Best practice: Use **context parameter
+@task
+def my_task(**context):
+    ti = context['ti']
+    dag_run = context['dag_run']
+    ...</pre>
+                    </div>
+                </div>
+
+                <div class="concept-box">
+                    <h4>What is context?</h4>
+                    <p>Context is a dictionary containing runtime information like the task instance (<code>ti</code>), DAG run, execution date, etc. In Airflow 3.x, it's better to receive it as a parameter rather than calling <code>get_current_context()</code>.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <span class="change-type breaking">Breaking Change</span>
+                <h3>4. Task State Management</h3>
+                
+                <div class="comparison">
+                    <div class="before card">
+                        <div class="code-label old">Airflow 2.9</div>
+                        <pre>from airflow.utils.state import State
+
+if task.state == State.FAILED:
+    ...</pre>
+                    </div>
+                    <div class="after card">
+                        <div class="code-label new">Airflow 3.1.5</div>
+                        <pre>from airflow.utils.state import TaskInstanceState
+
+if task.state == TaskInstanceState.FAILED:
+    ...</pre>
+                    </div>
+                </div>
+
+                <p><strong>Why?</strong> State enums were refactored for better type safety and clarity.</p>
+            </div>
+
+            <div class="card">
+                <span class="change-type deprecated">Deprecated</span>
+                <h3>5. Direct Database Access</h3>
+                
+                <div class="important-box">
+                    <h4>Important Architecture Change</h4>
+                    <p>In Airflow 3.x, tasks should <strong>NOT</strong> directly access the metadata database. This was discouraged in 2.x but is now a hard requirement.</p>
+                </div>
+
+                <div class="comparison">
+                    <div class="before card">
+                        <div class="code-label old">Airflow 2.9 (Not Recommended)</div>
+                        <pre>import psycopg2
+
+@task
+def check_scheduler():
+    conn = psycopg2.connect(...)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM job WHERE ...")
+    # ❌ Direct DB access from task</pre>
+                    </div>
+                    <div class="after card">
+                        <div class="code-label new">Airflow 3.1.5 (Correct Way)</div>
+                        <pre>@task
+def check_database():
+    # ✅ Use CLI or API instead
+    cmd = "airflow db check"
+    result = subprocess.run(cmd, ...)
+    # Or use Airflow's API endpoints</pre>
+                    </div>
+                </div>
+
+                <p><strong>Why?</strong> This improves separation of concerns and makes DAGs more portable and testable.</p>
+            </div>
+        </section>
+
+        <!-- Major Code Changes Section -->
+        <section class="section">
+            <h2>🔄 What Changed in Your Code</h2>
+
+            <div class="card">
+                <h3>DAG Definition</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Aspect</th>
+                            <th>Old (2.9)</th>
+                            <th>New (3.1.5)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>DAG ID</strong></td>
+                            <td><code>ha_service_health_monitor_v8</code></td>
+                            <td><code>d02-v01-health_monitor</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Scheduling</strong></td>
+                            <td><code>schedule_interval=timedelta(...)</code></td>
+                            <td><code>schedule=timedelta(...)</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Dependencies</strong></td>
+                            <td>SSH to multiple servers</td>
+                            <td>Local systemd services only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Database Access</strong></td>
+                            <td>Direct psycopg2 queries</td>
+                            <td>CLI commands (<code>airflow db check</code>)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>RabbitMQ Checks</strong></td>
+                            <td>pika library to connect</td>
+                            <td>Redis ping (Celery broker)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>Architecture Simplification</h3>
+                <p>Your original DAG monitored a complex HA (High Availability) setup with:</p>
+                <ul>
+                    <li>14 different servers (HAProxy, PostgreSQL cluster, RabbitMQ cluster, Celery workers, NFS nodes)</li>
+                    <li>SSH connections to remote servers</li>
+                    <li>Direct database queries</li>
+                    <li>RabbitMQ cluster health checks</li>
+                </ul>
+
+                <p>The new version simplifies to:</p>
+                <ul>
+                    <li><strong>Single server monitoring</strong> (the one running Airflow)</li>
+                    <li><strong>Local systemd service checks</strong> (no SSH needed)</li>
+                    <li><strong>CLI-based database checks</strong> (no direct queries)</li>
+                    <li><strong>Redis connectivity tests</strong> (simpler than RabbitMQ cluster)</li>
+                </ul>
+
+                <div class="concept-box">
+                    <h4>Why the simplification?</h4>
+                    <p>You requested <em>"no dependency"</em> on external servers. The new code monitors only local services, making it:</p>
+                    <ul>
+                        <li>✅ Self-contained and portable</li>
+                        <li>✅ Easier to test and debug</li>
+                        <li>✅ Compatible with your new single-node architecture</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Services Being Monitored</h3>
+                <div class="comparison">
+                    <div class="before card">
+                        <div class="code-label old">Old: 14 Servers, 30+ Services</div>
+                        <ul>
+                            <li>HAProxy (2 nodes)</li>
+                            <li>Airflow Scheduler (2 nodes)</li>
+                            <li>Airflow Webserver (2 nodes)</li>
+                            <li>PostgreSQL Patroni cluster (3 nodes)</li>
+                            <li>RabbitMQ cluster (3 nodes)</li>
+                            <li>Celery workers (2 nodes)</li>
+                            <li>NFS servers (2 nodes)</li>
+                            <li>FTP server (1 node)</li>
+                            <li>System resources on all 14 nodes</li>
+                        </ul>
+                    </div>
+                    <div class="after card">
+                        <div class="code-label new">New: 1 Server, 7 Services</div>
+                        <ul>
+                            <li>airflow-scheduler</li>
+                            <li>airflow-api-server</li>
+                            <li>airflow-dag-processor</li>
+                            <li>airflow-triggerer</li>
+                            <li>airflow-celery-worker</li>
+                            <li>PostgreSQL (connectivity)</li>
+                            <li>Redis (connectivity)</li>
+                            <li>Local system resources</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Python 3.12 Changes Section -->
+        <section class="section">
+            <h2>🐍 Python 3.9 → 3.12 Changes</h2>
+
+            <div class="card">
+                <span class="change-type improved">Improved</span>
+                <h3>Better Type Hints and Error Messages</h3>
+                <p>Python 3.12 has improved type hints and more informative error messages. The code uses these features for better debugging.</p>
+            </div>
+
+            <div class="card">
+                <span class="change-type improved">Improved</span>
+                <h3>Performance Improvements</h3>
+                <p>Python 3.12 is significantly faster than 3.9 (up to 10-15% faster). Your DAG will execute tasks more efficiently.</p>
+            </div>
+
+            <div class="card">
+                <h3>Breaking Changes That Don't Affect This Code</h3>
+                <p>While Python 3.12 has some breaking changes, none affect this particular DAG because:</p>
+                <ul>
+                    <li>We're not using deprecated stdlib modules</li>
+                    <li>No reliance on old distutils (removed in 3.12)</li>
+                    <li>Standard library imports remain compatible</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- New Features Section -->
+        <section class="section">
+            <h2>✨ New Features You Can Use</h2>
+
+            <div class="card">
+                <span class="change-type new-feature">New in 3.x</span>
+                <h3>Separated DAG Processor</h3>
+                <p>In Airflow 3.x, DAG parsing is handled by a separate <code>dag-processor</code> service. This means:</p>
+                <ul>
+                    <li>📈 <strong>Better performance</strong>: Scheduler doesn't pause for DAG parsing</li>
+                    <li>🔒 <strong>More stable</strong>: DAG parsing errors don't crash the scheduler</li>
+                    <li>⚡ <strong>Faster DAG updates</strong>: New/modified DAGs are picked up quicker</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <span class="change-type new-feature">New in 3.x</span>
+                <h3>Improved XCom Handling</h3>
+                <p>XCom (cross-communication) between tasks is more efficient and supports larger payloads.</p>
+                <pre>@task
+def task_a():
+    return {'large_data': [...]}  # Returns are automatically pushed to XCom
+
+@task
+def task_b(**context):
+    ti = context['ti']
+    data = ti.xcom_pull(task_ids='task_a')  # Pull from previous task</pre>
+            </div>
+
+            <div class="card">
+                <span class="change-type improved">Improved</span>
+                <h3>Better CLI Commands</h3>
+                <div class="comparison">
+                    <div class="before card">
+                        <div class="code-label old">Airflow 2.9</div>
+                        <pre># Check Celery workers
+airflow celery inspect active</pre>
+                    </div>
+                    <div class="after card">
+                        <div class="code-label new">Airflow 3.1.5</div>
+                        <pre># Improved command structure
+airflow celery list-workers</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Best Practices Section -->
+        <section class="section">
+            <h2>✅ Best Practices for Airflow 3.x</h2>
+
+            <div class="card">
+                <h3>1. Use TaskFlow API</h3>
+                <p>Always prefer <code>@task</code> decorator over traditional operators when possible.</p>
+                <pre>@task
+def process_data(data):
+    # Your logic here
+    return result
+
+# Much cleaner than:
+# PythonOperator(task_id='process_data', python_callable=...)</pre>
+            </div>
+
+            <div class="card">
+                <h3>2. Pass Context as Parameter</h3>
+                <p>Use <code>**context</code> instead of <code>get_current_context()</code>:</p>
+                <pre>@task
+def my_task(**context):  # ✅ Recommended
+    ti = context['ti']
+    dag_run = context['dag_run']
+    ...</pre>
+            </div>
+
+            <div class="card">
+                <h3>3. Avoid Direct Database Access</h3>
+                <p>Use Airflow's CLI, API, or built-in methods instead of direct database queries.</p>
+            </div>
+
+            <div class="card">
+                <h3>4. Use trigger_rule for Conditional Logic</h3>
+                <p>The <code>trigger_rule="all_done"</code> ensures a task runs regardless of upstream failures:</p>
+                <pre>@task(trigger_rule="all_done")
+def cleanup(**context):
+    # This runs even if upstream tasks failed
+    ...</pre>
+            </div>
+
+            <div class="card">
+                <h3>5. Proper Error Handling</h3>
+                <p>Raise <code>AirflowException</code> for task failures to integrate with Airflow's retry mechanism:</p>
+                <pre>from airflow.exceptions import AirflowException
+
+@task
+def check_service():
+    if not service_healthy:
+        raise AirflowException("Service is down!")  # ✅ Proper way
+        # Don't use: raise Exception(...)  # ❌ Generic exceptions</pre>
+            </div>
+        </section>
+
+        <!-- File Naming Section -->
+        <section class="section">
+            <h2>📁 File and DAG Naming Convention</h2>
+
+            <div class="card">
+                <h3>Your New Naming Structure</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Element</th>
+                            <th>Format</th>
+                            <th>Example</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>DAG ID</strong></td>
+                            <td><code>d{number}-v{version}-{name}</code></td>
+                            <td><code>d02-v01-health_monitor</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>File Name</strong></td>
+                            <td>Same as DAG ID + <code>.py</code></td>
+                            <td><code>d02-v01-health_monitor.py</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>DAG Number</strong></td>
+                            <td>Sequential (01, 02, 03...)</td>
+                            <td>02 (second DAG)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Version Number</strong></td>
+                            <td>Incremental (v01, v02, v03...)</td>
+                            <td>v01 (first version)</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="concept-box">
+                    <h4>Benefits of This Convention</h4>
+                    <ul>
+                        <li>🔍 <strong>Easy to track</strong>: Quickly see DAG number and version</li>
+                        <li>📊 <strong>Version history</strong>: Keep old versions for rollback</li>
+                        <li>🗂️ <strong>Organized</strong>: DAGs sort naturally by number</li>
+                        <li>🚀 <strong>Deployment</strong>: Clear which version is in production</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- Deployment Section -->
+        <section class="section">
+            <h2>🚀 Deploying Your New DAG</h2>
+
+            <div class="card">
+                <h3>Step-by-Step Deployment</h3>
+                
+                <div style="background: var(--bg-secondary); padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
+                    <p><strong>1. Place the DAG file in your DAGs folder:</strong></p>
+                    <pre>cp d02-v01-health_monitor.py $AIRFLOW_HOME/dags/</pre>
+                </div>
+
+                <div style="background: var(--bg-secondary); padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
+                    <p><strong>2. Verify DAG syntax:</strong></p>
+                    <pre>airflow dags list-import-errors</pre>
+                </div>
+
+                <div style="background: var(--bg-secondary); padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
+                    <p><strong>3. Check if DAG is recognized:</strong></p>
+                    <pre>airflow dags list | grep d02-v01-health_monitor</pre>
+                </div>
+
+                <div style="background: var(--bg-secondary); padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
+                    <p><strong>4. Test the DAG:</strong></p>
+                    <pre>airflow dags test d02-v01-health_monitor 2025-01-01</pre>
+                </div>
+
+                <div style="background: var(--bg-secondary); padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
+                    <p><strong>5. Unpause the DAG to start scheduling:</strong></p>
+                    <pre>airflow dags unpause d02-v01-health_monitor</pre>
+                </div>
+            </div>
+
+            <div class="important-box">
+                <h4>Permissions Note</h4>
+                <p>Make sure the DAG file has proper permissions and is readable by the Airflow user:</p>
+                <pre>chown airflow:airflow $AIRFLOW_HOME/dags/d02-v01-health_monitor.py
+chmod 644 $AIRFLOW_HOME/dags/d02-v01-health_monitor.py</pre>
+            </div>
+        </section>
+
+        <!-- Testing Section -->
+        <section class="section">
+            <h2>🧪 Testing Your DAG</h2>
+
+            <div class="card">
+                <h3>Test Individual Tasks</h3>
+                <pre># Test a specific task
+airflow tasks test d02-v01-health_monitor check_scheduler_service 2025-01-01
+
+# Test with verbose output
+airflow tasks test d02-v01-health_monitor check_scheduler_service 2025-01-01 -v</pre>
+            </div>
+
+            <div class="card">
+                <h3>Monitor DAG Execution</h3>
+                <p>Access the Airflow Web UI and navigate to:</p>
+                <ul>
+                    <li><strong>DAGs</strong> → Find <code>d02-v01-health_monitor</code></li>
+                    <li><strong>Graph View</strong> → See task dependencies</li>
+                    <li><strong>Tree View</strong> → See historical runs</li>
+                    <li><strong>Log View</strong> → Debug task failures</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h3>Check Service Status</h3>
+                <pre># Verify all Airflow services are running
+systemctl status airflow-scheduler
+systemctl status airflow-api-server
+systemctl status airflow-dag-processor
+systemctl status airflow-triggerer
+systemctl status airflow-celery-worker</pre>
+            </div>
+        </section>
+
+        <!-- Summary Section -->
+        <section class="section">
+            <h2>📊 Summary of Changes</h2>
+
+            <div class="card">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Changes Made</th>
+                            <th>Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Import Updates</strong></td>
+                            <td>Updated state imports, removed external libraries</td>
+                            <td>3</td>
+                        </tr>
+                        <tr>
+                            <td><strong>DAG Parameters</strong></td>
+                            <td><code>schedule_interval</code> → <code>schedule</code>, new DAG ID</td>
+                            <td>2</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Architecture</strong></td>
+                            <td>Simplified from 14 servers to local-only</td>
+                            <td>1 major</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Tasks Removed</strong></td>
+                            <td>External server checks (HAProxy, RabbitMQ cluster, etc.)</td>
+                            <td>~15</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Tasks Added</strong></td>
+                            <td>Local service checks (5), connectivity checks (2)</td>
+                            <td>7</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Database Access</strong></td>
+                            <td>Removed direct psycopg2 queries, use CLI instead</td>
+                            <td>3</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Context Handling</strong></td>
+                            <td>Changed to <code>**context</code> parameter pattern</td>
+                            <td>2</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Error Handling</strong></td>
+                            <td>Consistent <code>AirflowException</code> usage</td>
+                            <td>All tasks</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Quick Reference Section -->
+        <section class="section">
+            <h2>📚 Quick Reference</h2>
+
+            <div class="comparison">
+                <div class="card">
+                    <h3>Common Airflow 3.x Commands</h3>
+                    <pre># Database
+airflow db check
+airflow db init
+airflow db upgrade
+
+# DAGs
+airflow dags list
+airflow dags test DAG_ID DATE
+airflow dags unpause DAG_ID
+
+# Tasks
+airflow tasks list DAG_ID
+airflow tasks test DAG_ID TASK_ID DATE
+
+# Celery
+airflow celery list-workers
+airflow celery flower  # Monitoring UI
+
+# Users (requires FAB provider)
+airflow users create --role Admin --username admin --email admin@example.com --firstname Admin --lastname User --password admin</pre>
+                </div>
+
+                <div class="card">
+                    <h3>Important Directories</h3>
+                    <pre># Airflow home
+/home/airflow
+
+# DAGs folder
+/home/airflow/dags
+
+# Logs folder
+/home/airflow/logs
+
+# Config file
+/home/airflow/airflow.cfg
+
+# Plugins folder
+/home/airflow/plugins</pre>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="footer">
+        <p>🎉 You're now ready to use Airflow 3.1.5!</p>
+        <p style="margin-top: 1rem; color: var(--text-secondary);">
+            For more information, visit 
+            <a href="https://airflow.apache.org/docs/apache-airflow/3.1.5/" 
+               style="color: var(--accent-primary); text-decoration: none;">
+                Airflow 3.1.5 Documentation
+            </a>
+        </p>
+    </div>
+
+    <script>
+        // Scroll indicator
+        window.addEventListener('scroll', () => {
+            const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+            const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+            const scrolled = (winScroll / height) * 100;
+            document.getElementById('scrollIndicator').style.width = scrolled + '%';
+        });
+
+        // Smooth scroll for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
+</body>
+</html>
